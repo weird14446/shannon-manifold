@@ -4,8 +4,6 @@
   "service": "backend",
   "workspaceFolder": "/app",
   
-  "onCreateCommand": "sudo chown -R vscode:vscode /app",
-  
   "customizations": {
     "vscode": {
       "extensions": [
