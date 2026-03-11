@@ -949,11 +949,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .playground-infoview-panel {
-  display: flex;
+  display: grid;
+  grid-template-rows: auto minmax(320px, 1fr) auto;
   min-height: 0;
-  flex-direction: column;
   border-left: var(--glass-border);
   background: rgba(7, 11, 18, 0.9);
+  overflow: hidden;
 }
 
 .playground-infoview-head {
@@ -968,11 +969,13 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .playground-infoview-host {
-  flex: 1;
   min-height: 0;
+  height: 100%;
+  min-height: 320px;
   overflow: auto;
   overscroll-behavior: contain;
   background: rgba(3, 6, 11, 0.95);
+  border-bottom: var(--glass-border);
 }
 
 .playground-infoview-host iframe {
@@ -987,7 +990,8 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   gap: 10px;
   padding: 14px 18px 18px;
-  border-top: var(--glass-border);
+  max-height: 320px;
+  overflow: auto;
 }
 
 .playground-import-list {
@@ -1103,6 +1107,10 @@ h1, h2, h3, h4, h5, h6 {
   .playground-infoview-panel {
     border-left: none;
     border-top: var(--glass-border);
+  }
+
+  .playground-infoview-host {
+    min-height: 280px;
   }
 }
 

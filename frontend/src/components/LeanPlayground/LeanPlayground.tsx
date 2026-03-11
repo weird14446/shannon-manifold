@@ -837,7 +837,10 @@ export function LeanPlayground({
                   <Sparkles size={16} color="var(--secondary-accent)" />
                   <span>Infoview</span>
                 </div>
-                <p>Goals, messages, tactics, and diagnostics from the Lean server.</p>
+                <p>
+                  Goals, messages, tactics, and diagnostics from the Lean server. Place the cursor
+                  inside a theorem or `by` block to inspect the current proof state.
+                </p>
               </div>
 
               <div ref={infoviewRef} className="playground-infoview-host" />
