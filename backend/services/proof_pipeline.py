@@ -141,6 +141,8 @@ def _generate_lean4_code(title: str, theorem_identifier: str, excerpt: str) -> s
         "- Formalize hypotheses and imported dependencies.\n"
         "- Replace the trivial proof with the actual Lean4 proof.\n"
         "-/\n\n"
+        "import ShannonManifold\n\n"
+        "open ShannonManifold\n\n"
         f"theorem {theorem_identifier}_draft : True := by\n"
         "  trivial\n"
     )

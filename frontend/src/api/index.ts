@@ -54,10 +54,38 @@ export interface ChatMessagePayload {
   content: string;
 }
 
+export interface ChatCodeContextPayload {
+  title: string;
+  content: string;
+  language?: string;
+  module_name?: string | null;
+  path?: string | null;
+}
+
 export interface ChatReply {
   reply: string;
   provider: string;
   model: string;
+  suggested_code?: string | null;
+  suggested_language?: string | null;
+}
+
+export interface IndexedProofSummary {
+  id: number;
+  title: string;
+  statement: string;
+  proof_language: string;
+  is_verified: boolean;
+  can_edit: boolean;
+  source_kind: string;
+  status: string;
+  updated_at: string;
+  path: string | null;
+  module_name: string | null;
+}
+
+export interface IndexedProofDetail extends IndexedProofSummary {
+  content: string;
 }
 
 export interface LeanWorkspaceModule {
@@ -82,6 +110,27 @@ export interface LeanWorkspaceSyncResponse extends LeanWorkspaceInfo {
   pushed: boolean;
   remote_content_url: string | null;
   remote_commit_url: string | null;
+}
+
+export interface LeanImportGraphNode {
+  id: string;
+  label: string;
+  module_name: string;
+  path: string | null;
+  title: string;
+  imports: number;
+  source_kind: string;
+}
+
+export interface LeanImportGraphLink {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface LeanImportGraph {
+  nodes: LeanImportGraphNode[];
+  links: LeanImportGraphLink[];
 }
 
 const TOKEN_STORAGE_KEY = 'shannon-manifold-token';
@@ -124,8 +173,13 @@ export const hasStoredToken = () => Boolean(authToken);
 export const chatWithOracle = async (
   message: string,
   history: ChatMessagePayload[],
+  codeContext?: ChatCodeContextPayload | null,
 ) => {
-  const response = await api.post<ChatReply>('/chat/', { message, history });
+  const response = await api.post<ChatReply>('/chat/', {
+    message,
+    history,
+    code_context: codeContext ?? null,
+  });
   return response.data;
 };
 
@@ -190,12 +244,32 @@ export const regenerateProofWorkspace = async (workspaceId: number) => {
 };
 
 export const getTheorems = async () => {
-  const response = await api.get('/theorems/');
+  const response = await api.get<IndexedProofSummary[]>('/theorems/');
   return response.data;
 };
 
-export const getAgentEvents = async () => {
-  const response = await api.get('/agents/events');
+export const getTheoremDetail = async (theoremId: number) => {
+  const response = await api.get<IndexedProofDetail>(`/theorems/${theoremId}`);
+  return response.data;
+};
+
+export const updateTheorem = async (
+  theoremId: number,
+  payload: {
+    title: string;
+    content: string;
+  },
+) => {
+  const response = await api.put<IndexedProofDetail>(`/theorems/${theoremId}`, payload);
+  return response.data;
+};
+
+export const deleteTheorem = async (theoremId: number) => {
+  await api.delete(`/theorems/${theoremId}`);
+};
+
+export const getLeanImportGraph = async () => {
+  const response = await api.get<LeanImportGraph>('/lean-workspace/import-graph');
   return response.data;
 };
 

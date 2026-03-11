@@ -8,6 +8,12 @@ from config import get_settings
 from database import Base, SessionLocal, engine
 from routers import agents, auth, chat, lean_workspace, proofs, theorems
 from seed import seed_database
+from services.rag_index import (
+    cleanup_missing_workspace_documents,
+    ensure_rag_collection,
+    sync_existing_proof_documents,
+    sync_workspace_seed_documents,
+)
 
 settings = get_settings()
 
@@ -18,9 +24,21 @@ async def lifespan(_: FastAPI):
     settings.proof_artifact_dir.mkdir(parents=True, exist_ok=True)
     settings.lean_workspace_dir.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    try:
+        ensure_rag_collection(settings)
+    except Exception as exc:  # pragma: no cover - startup resilience
+        print(f"Warning: failed to initialize Qdrant collection: {exc}")
     db = SessionLocal()
     try:
         seed_database(db)
+        try:
+            await sync_workspace_seed_documents(db, settings)
+            cleanup_missing_workspace_documents(db, settings=settings)
+            await sync_existing_proof_documents(db, settings)
+            db.commit()
+        except Exception as exc:  # pragma: no cover - startup resilience
+            db.rollback()
+            print(f"Warning: failed to sync workspace seed documents: {exc}")
     finally:
         db.close()
     yield

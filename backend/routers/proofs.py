@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,9 @@ from database import get_db
 from models.proof_workspace import ProofWorkspace
 from models.user import User
 from security import get_current_user
+from services.lean_workspace import LeanWorkspaceError, build_workspace_module_sync, write_workspace_file
 from services.proof_pipeline import build_formalization_bundle, extract_text_from_pdf
+from services.rag_index import sync_proof_workspace_to_rag
 
 router = APIRouter(prefix="/proofs", tags=["proofs"])
 settings = get_settings()
@@ -112,6 +115,23 @@ def create_manual_workspace(
     db.add(workspace)
     db.commit()
     db.refresh(workspace)
+    saved_file = write_workspace_file(
+        settings,
+        code=workspace.lean4_code,
+        title=workspace.title,
+    )
+    _build_saved_workspace_or_422(saved_file)
+    asyncio.run(
+        sync_proof_workspace_to_rag(
+            db,
+            settings=settings,
+            workspace=workspace,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+        )
+    )
+    db.commit()
+    db.refresh(workspace)
     return _to_detail_response(workspace)
 
 
@@ -178,6 +198,23 @@ async def upload_pdf_workspace(
     db.add(workspace)
     db.commit()
     db.refresh(workspace)
+    saved_file = write_workspace_file(
+        settings,
+        code=workspace.lean4_code,
+        title=workspace.title,
+    )
+    _build_saved_workspace_or_422(saved_file)
+    asyncio.run(
+        sync_proof_workspace_to_rag(
+            db,
+            settings=settings,
+            workspace=workspace,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+        )
+    )
+    db.commit()
+    db.refresh(workspace)
     return _to_detail_response(workspace)
 
 
@@ -196,6 +233,23 @@ def update_proof_workspace(
     workspace.rocq_code = payload.rocq_code
     workspace.status = "edited"
 
+    db.commit()
+    db.refresh(workspace)
+    saved_file = write_workspace_file(
+        settings,
+        code=workspace.lean4_code,
+        title=workspace.title,
+    )
+    _build_saved_workspace_or_422(saved_file)
+    asyncio.run(
+        sync_proof_workspace_to_rag(
+            db,
+            settings=settings,
+            workspace=workspace,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+        )
+    )
     db.commit()
     db.refresh(workspace)
     return _to_detail_response(workspace)
@@ -225,6 +279,23 @@ def regenerate_proof_workspace(
 
     db.commit()
     db.refresh(workspace)
+    saved_file = write_workspace_file(
+        settings,
+        code=workspace.lean4_code,
+        title=workspace.title,
+    )
+    _build_saved_workspace_or_422(saved_file)
+    asyncio.run(
+        sync_proof_workspace_to_rag(
+            db,
+            settings=settings,
+            workspace=workspace,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+        )
+    )
+    db.commit()
+    db.refresh(workspace)
     return _to_detail_response(workspace)
 
 
@@ -240,6 +311,20 @@ def _get_workspace_or_404(db: Session, current_user: User, workspace_id: int) ->
     if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proof workspace not found.")
     return workspace
+
+
+def _build_saved_workspace_or_422(saved_file: dict[str, str]) -> None:
+    try:
+        build_workspace_module_sync(
+            settings,
+            relative_workspace_path=saved_file["path"],
+            module_name=saved_file["module"],
+        )
+    except LeanWorkspaceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 def _to_summary_response(workspace: ProofWorkspace) -> ProofWorkspaceSummaryResponse:

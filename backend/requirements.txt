@@ -10,3 +10,4 @@ pymysql
 pypdf
 python-multipart
 httpx
+qdrant-client

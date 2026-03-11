@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowLeft, Bot, FileUp, LogOut, Microscope, ShieldCheck, X } from 'lucide-react';
+import { ArrowLeft, Bot, FileUp, LogOut, Microscope, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import './index.css';
 
 import {
+  type ChatCodeContextPayload,
   getCurrentUser,
   hasStoredToken,
   setAuthToken,
@@ -15,8 +16,9 @@ import { Chatbot } from './components/Chatbot/Chatbot';
 import { RecoverableErrorBoundary } from './components/ErrorBoundary/RecoverableErrorBoundary';
 import { AgentGraph } from './components/AgentGraph/AgentGraph';
 import { TheoremExplorer } from './components/TheoremList/TheoremExplorer';
+import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
 
-type AppView = 'dashboard' | 'playground';
+type AppView = 'dashboard' | 'playground' | 'code';
 
 interface PlaygroundSeed {
   code: string;
@@ -30,11 +32,25 @@ const getInitialView = (): AppView => {
   }
 
   const view = new URLSearchParams(window.location.search).get('view');
-  if (view === 'playground') {
+  if (view === 'playground' || view === 'code') {
     return view;
   }
 
   return 'dashboard';
+};
+
+const getInitialDocumentId = (): number | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = new URLSearchParams(window.location.search).get('document');
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
 const encodeLeanShareCode = (code: string) => {
@@ -53,12 +69,19 @@ function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isBootstrappingSession, setIsBootstrappingSession] = useState(true);
   const [currentView, setCurrentView] = useState<AppView>(() => getInitialView());
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(() =>
+    getInitialDocumentId(),
+  );
   const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(null);
   const [playgroundLoaderVersion, setPlaygroundLoaderVersion] = useState(0);
   const [shouldOpenUploadAfterAuth, setShouldOpenUploadAfterAuth] = useState(false);
   const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [graphRefreshKey, setGraphRefreshKey] = useState(0);
+  const [playgroundChatContext, setPlaygroundChatContext] = useState<ChatCodeContextPayload | null>(
+    null,
+  );
   const proofUploadInputRef = useRef<HTMLInputElement>(null);
 
   const LazyLeanPlayground = useMemo(
@@ -130,8 +153,14 @@ function App() {
       url.searchParams.delete('leanTitle');
     }
 
+    if (currentView === 'code' && selectedDocumentId) {
+      url.searchParams.set('document', String(selectedDocumentId));
+    } else {
+      url.searchParams.delete('document');
+    }
+
     window.history.replaceState({}, '', url);
-  }, [currentView, playgroundSeed]);
+  }, [currentView, playgroundSeed, selectedDocumentId]);
 
   const handleAuthenticated = (payload: AuthResponse) => {
     setAuthToken(payload.access_token);
@@ -156,6 +185,11 @@ function App() {
     }
 
     setCurrentView('playground');
+  };
+
+  const openVerifiedCode = (documentId: number) => {
+    setSelectedDocumentId(documentId);
+    setCurrentView('code');
   };
 
   const handleProofUploadRequest = () => {
@@ -187,6 +221,7 @@ function App() {
         revision: Date.now(),
         title: `${workspace.title} · Lean4`,
       });
+      setGraphRefreshKey((current) => current + 1);
       setCurrentView('playground');
     } catch (error: any) {
       if (error?.response?.status === 401) {
@@ -206,6 +241,13 @@ function App() {
   const handleRetryPlayground = () => {
     setPlaygroundLoaderVersion((current) => current + 1);
     setCurrentView('playground');
+  };
+
+  const handleApplyChatSuggestedCode = (payload: { code: string; title: string }) => {
+    openLeanPlayground({
+      code: payload.code,
+      title: payload.title,
+    });
   };
 
   const renderPlaygroundFallback = (errorMessage?: string | null) => (
@@ -261,7 +303,7 @@ function App() {
           >
             Lean Playground
           </button>
-          {currentView === 'playground' && (
+          {(currentView === 'playground' || currentView === 'code') && (
             <button className="button-secondary" onClick={() => setCurrentView('dashboard')}>
               <ArrowLeft size={16} />
               Main Page
@@ -305,7 +347,10 @@ function App() {
         {currentView === 'dashboard' ? (
           <section className="dashboard-columns">
             <aside className="glass-panel dashboard-database-panel">
-              <TheoremExplorer />
+              <TheoremExplorer
+                currentUser={currentUser}
+                onOpenProof={openVerifiedCode}
+              />
             </aside>
 
             <section className="dashboard-main-panel">
@@ -329,26 +374,62 @@ function App() {
                     pointerEvents: 'none',
                   }}
                 >
-                  <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                    Multi-Agent Research Manifold
-                  </h2>
-                  <p
+                  <div
                     style={{
-                      color: 'rgba(255,255,255,0.7)',
-                      fontSize: '0.9rem',
-                      marginTop: '4px',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      gap: '16px',
+                      width: '100%',
                     }}
                   >
-                    Live interactions between AI researchers
-                  </p>
+                    <div>
+                      <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+                        Lean Import Manifold
+                      </h2>
+                      <p
+                        style={{
+                          color: 'rgba(255,255,255,0.7)',
+                          fontSize: '0.9rem',
+                          marginTop: '4px',
+                          textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                        }}
+                      >
+                        Visualized import relationships across verified user-uploaded Lean
+                        modules. Refresh when you want a new snapshot.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      style={{ pointerEvents: 'auto' }}
+                      onClick={() => setGraphRefreshKey((current) => current + 1)}
+                    >
+                      <RefreshCw size={16} />
+                      Refresh
+                    </button>
+                  </div>
                 </div>
-                <AgentGraph />
+                <AgentGraph refreshKey={graphRefreshKey} />
               </div>
 
               {uploadError && <div className="auth-error">{uploadError}</div>}
             </section>
           </section>
+        ) : currentView === 'code' ? (
+          selectedDocumentId ? (
+            <VerifiedCodeViewer
+              currentUser={currentUser}
+              documentId={selectedDocumentId}
+              onBack={() => setCurrentView('dashboard')}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onOpenPlayground={openLeanPlayground}
+            />
+          ) : (
+            <section className="verified-code-screen glass-panel">
+              <div className="theorem-empty-state">Select a verified code entry from the dashboard.</div>
+            </section>
+          )
         ) : (
           <section className="playground-screen">
             {uploadError && <div className="auth-error">{uploadError}</div>}
@@ -362,6 +443,7 @@ function App() {
                   currentUser={currentUser}
                   onOpenAuth={() => setIsAuthOpen(true)}
                   onLogout={handleLogout}
+                  onDocumentChange={setPlaygroundChatContext}
                 />
               </Suspense>
             </RecoverableErrorBoundary>
@@ -393,6 +475,8 @@ function App() {
             currentUser={currentUser}
             onOpenAuth={() => setIsAuthOpen(true)}
             onLogout={handleLogout}
+            codeContext={currentView === 'playground' ? playgroundChatContext : null}
+            onApplySuggestedCode={handleApplyChatSuggestedCode}
           />
         </div>
       </div>

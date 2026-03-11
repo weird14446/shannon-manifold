@@ -21,11 +21,21 @@ services:
       timeout: 5s
       retries: 10
 
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   backend:
     build: 
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     ports:
       - "8000:8000"
     volumes:
@@ -33,13 +43,22 @@ services:
       - ./lean-workspace:/workspace/lean-workspace
     environment:
       CHATBOT_MODEL: ${CHATBOT_MODEL}
-      CHATBOT_PROVIDER: ${CHATBOT_PROVIDER:-mock}
-      CHATBOT_API_BASE_URL: ${CHATBOT_API_BASE_URL:-https://api.openai.com/v1}
+      CHATBOT_PROVIDER: ${CHATBOT_PROVIDER:-gemini}
+      CHATBOT_API_BASE_URL: ${CHATBOT_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
       CHATBOT_API_KEY: ${CHATBOT_API_KEY:-}
       CHATBOT_SYSTEM_PROMPT: ${CHATBOT_SYSTEM_PROMPT:-}
       CHATBOT_TEMPERATURE: ${CHATBOT_TEMPERATURE:-0.2}
       CHATBOT_TIMEOUT_SECONDS: ${CHATBOT_TIMEOUT_SECONDS:-45}
       CHATBOT_MAX_HISTORY_MESSAGES: ${CHATBOT_MAX_HISTORY_MESSAGES:-12}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local_hash}
+      EMBEDDING_API_BASE_URL: ${EMBEDDING_API_BASE_URL:-https://api.openai.com/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-45}
+      EMBEDDING_VECTOR_SIZE: ${EMBEDDING_VECTOR_SIZE:-256}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-shannon_manifold_chunks}
       CORS_ORIGINS: ${CORS_ORIGINS}
       DATABASE_URL: ${DATABASE_URL:-}
       MYSQL_HOST: ${MYSQL_HOST}
@@ -53,6 +72,7 @@ services:
       PROOF_UPLOAD_DIR: ${PROOF_UPLOAD_DIR}
       PROOF_ARTIFACT_DIR: ${PROOF_ARTIFACT_DIR}
       LEAN_WORKSPACE_DIR: ${LEAN_WORKSPACE_DIR:-/workspace/lean-workspace}
+      LEAN_SERVER_API_URL: ${LEAN_SERVER_API_URL:-http://lean-server:8080}
       LEAN_PLAYGROUND_FILE: ${LEAN_PLAYGROUND_FILE:-ShannonManifold/Playground.lean}
       LEAN_REPOSITORY_SUBDIR: ${LEAN_REPOSITORY_SUBDIR:-lean-workspace}
       GITHUB_REPOSITORY_URL: ${GITHUB_REPOSITORY_URL:-}
@@ -63,6 +83,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      qdrant:
+        condition: service_started
 
   lean-server:
     build:
@@ -109,3 +131,4 @@ volumes:
   frontend_node_modules:
   mysql_data:
   lean_server_node_modules:
+  qdrant_data:
