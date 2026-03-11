@@ -1,14 +1,13 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
-import asyncio
-import os
-from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
-load_dotenv()
-
-MODEL_NAME = os.getenv("CHATBOT_MODEL", "default-mock-model")
+from config import get_settings
+from models.user import User
+from security import get_current_user
+from services.chat_provider import ChatProviderError, generate_chat_reply
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+settings = get_settings()
 
 class ChatMessage(BaseModel):
     role: str
@@ -16,20 +15,28 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    history: list[ChatMessage] = []
+    history: list[ChatMessage] = Field(default_factory=list)
 
 @router.post("/")
-async def chat_interaction(request: ChatRequest):
-    # Mock RAG response
-    await asyncio.sleep(1) # Simulate processing time
-    user_msg = request.message.lower()
-    
-    response_content = f"I am the RAG chatbot (Model: {MODEL_NAME}). "
-    if "pythagoras" in user_msg or "pythagorean" in user_msg:
-        response_content += "According to the verified theorem database (Theorem ID 1 in Lean4), the sum of the squares of the lengths of the legs of a right triangle is equal to the square of the length of the hypotenuse."
-    elif "fermat" in user_msg:
-        response_content += "Fermat's Last theorem for n=3 is verified in Rocq (Theorem ID 2)."
-    else:
-        response_content += "I can assist you with understanding verified proofs. How can I help you today?"
-        
-    return {"reply": response_content}
+async def chat_interaction(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not request.message.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message must not be empty.",
+        )
+
+    try:
+        return await generate_chat_reply(
+            message=request.message,
+            history=request.history,
+            user_full_name=current_user.full_name,
+            settings=settings,
+        )
+    except ChatProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc

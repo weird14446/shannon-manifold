@@ -3,3 +3,10 @@ uvicorn
 sqlalchemy
 pydantic
 python-dotenv
+PyJWT
+cryptography
+email-validator
+pymysql
+pypdf
+python-multipart
+httpx

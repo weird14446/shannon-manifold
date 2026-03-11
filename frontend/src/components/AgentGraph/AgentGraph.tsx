@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { getAgentEvents } from '../../api';
 

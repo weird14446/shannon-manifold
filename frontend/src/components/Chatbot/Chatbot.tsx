@@ -1,13 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User } from 'lucide-react';
-import { chatWithRAG } from '../../api';
+import { LockKeyhole, Send, Bot, User } from 'lucide-react';
+import { chatWithOracle, type AuthUser } from '../../api';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
 }
 
-export function Chatbot() {
+interface ChatbotProps {
+  currentUser: AuthUser | null;
+  onOpenAuth: () => void;
+  onLogout: () => void;
+}
+
+export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: 'Hello! I am the Shannon Manifold Theorem Oracle. How can I assist you with your mathematical proofs today?' }
   ]);
@@ -24,6 +30,11 @@ export function Chatbot() {
   }, [messages]);
 
   const handleSend = async () => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+
     if (!input.trim()) return;
 
     const userMessage: Message = { role: 'user', content: input };
@@ -32,11 +43,21 @@ export function Chatbot() {
     setIsLoading(true);
 
     try {
-      const { reply } = await chatWithRAG(input, messages);
+      const { reply } = await chatWithOracle(input, messages);
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Error communicating with the Oracle.' }]);
+
+      if ((error as any)?.response?.status === 401) {
+        onLogout();
+        onOpenAuth();
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: 'Your session expired. Please sign in again to continue.' }
+        ]);
+      } else {
+        setMessages((prev) => [...prev, { role: 'assistant', content: 'Error communicating with the Oracle.' }]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -75,16 +96,28 @@ export function Chatbot() {
         <div ref={messagesEndRef} />
       </div>
 
+      {!currentUser && (
+        <button
+          type="button"
+          className="chat-notice"
+          onClick={onOpenAuth}
+        >
+          <LockKeyhole size={16} />
+          Sign in to ask questions and keep your member session in the MySQL-backed workspace.
+        </button>
+      )}
+
       <div style={{ display: 'flex', gap: '8px' }}>
         <input 
           type="text" 
           className="input-field" 
-          placeholder="Ask a question..." 
+          placeholder={currentUser ? 'Ask a question...' : 'Login required to use the Oracle'} 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          disabled={!currentUser || isLoading}
         />
-        <button className="button-primary" onClick={handleSend} disabled={isLoading} style={{ padding: '10px' }}>
+        <button className="button-primary" onClick={handleSend} disabled={!currentUser || isLoading} style={{ padding: '10px' }}>
           <Send size={20} />
         </button>
       </div>

@@ -1,6 +1,10 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
-from typing import List, Optional
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
+from typing import List
+
+from database import get_db
+from models.theorem import Theorem
 
 router = APIRouter(prefix="/theorems", tags=["theorems"])
 
@@ -11,27 +15,8 @@ class TheoremResponse(BaseModel):
     proof_language: str
     is_verified: bool
 
-    class Config:
-        from_attributes = True
-
-# Mock data
-MOCK_THEOREMS = [
-    {
-        "id": 1,
-        "title": "Pythagorean Theorem",
-        "statement": "In a right-angled triangle, the square of the hypotenuse side is equal to the sum of squares of the other two sides.",
-        "proof_language": "Lean4",
-        "is_verified": True
-    },
-    {
-        "id": 2,
-        "title": "Fermat's Last Theorem (n=3)",
-        "statement": "There are no positive integers x, y, and z such that x^3 + y^3 = z^3.",
-        "proof_language": "Rocq",
-        "is_verified": True
-    }
-]
+    model_config = ConfigDict(from_attributes=True)
 
 @router.get("/", response_model=List[TheoremResponse])
-async def get_theorems():
-    return MOCK_THEOREMS
+async def get_theorems(db: Session = Depends(get_db)):
+    return db.query(Theorem).order_by(Theorem.id.asc()).all()

@@ -1,25 +1,111 @@
 services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: 
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ./lean-workspace:/workspace/lean-workspace
     environment:
-      - CHATBOT_MODEL=${CHATBOT_MODEL:-gpt-4o}
+      CHATBOT_MODEL: ${CHATBOT_MODEL}
+      CHATBOT_PROVIDER: ${CHATBOT_PROVIDER:-mock}
+      CHATBOT_API_BASE_URL: ${CHATBOT_API_BASE_URL:-https://api.openai.com/v1}
+      CHATBOT_API_KEY: ${CHATBOT_API_KEY:-}
+      CHATBOT_SYSTEM_PROMPT: ${CHATBOT_SYSTEM_PROMPT:-}
+      CHATBOT_TEMPERATURE: ${CHATBOT_TEMPERATURE:-0.2}
+      CHATBOT_TIMEOUT_SECONDS: ${CHATBOT_TIMEOUT_SECONDS:-45}
+      CHATBOT_MAX_HISTORY_MESSAGES: ${CHATBOT_MAX_HISTORY_MESSAGES:-12}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      DATABASE_URL: ${DATABASE_URL:-}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      PROOF_UPLOAD_DIR: ${PROOF_UPLOAD_DIR}
+      PROOF_ARTIFACT_DIR: ${PROOF_ARTIFACT_DIR}
+      LEAN_WORKSPACE_DIR: ${LEAN_WORKSPACE_DIR:-/workspace/lean-workspace}
+      LEAN_PLAYGROUND_FILE: ${LEAN_PLAYGROUND_FILE:-ShannonManifold/Playground.lean}
+      LEAN_REPOSITORY_SUBDIR: ${LEAN_REPOSITORY_SUBDIR:-lean-workspace}
+      GITHUB_REPOSITORY_URL: ${GITHUB_REPOSITORY_URL:-}
+      GITHUB_REPOSITORY_BRANCH: ${GITHUB_REPOSITORY_BRANCH:-main}
+      GITHUB_ACCESS_TOKEN: ${GITHUB_ACCESS_TOKEN:-}
+      GITHUB_COMMIT_AUTHOR_NAME: ${GITHUB_COMMIT_AUTHOR_NAME:-Shannon Manifold Bot}
+      GITHUB_COMMIT_AUTHOR_EMAIL: ${GITHUB_COMMIT_AUTHOR_EMAIL:-bot@shannon-manifold.local}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  lean-server:
+    build:
+      context: ./lean-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./lean-server:/app
+      - ./lean-workspace:/workspace/lean-workspace
+      - lean_server_node_modules:/app/node_modules
+    environment:
+      PORT: 8080
+      LEAN_PROJECT_PATH: ${LEAN_WORKSPACE_DIR:-/workspace/lean-workspace}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "5173:5173"
     volumes:
       - ./frontend:/app
-      - /app/node_modules
+      - frontend_node_modules:/app/node_modules
     environment:
-      - CHOKIDAR_USEPOLLING=true
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      VITE_LEAN_WS_URL: ${VITE_LEAN_WS_URL}
+      VITE_GITHUB_REPOSITORY_URL: ${VITE_GITHUB_REPOSITORY_URL:-}
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      lean-server:
+        condition: service_healthy
+
+volumes:
+  frontend_node_modules:
+  mysql_data:
+  lean_server_node_modules:
