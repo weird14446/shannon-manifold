@@ -706,98 +706,6 @@ export function LeanPlayground({
         onChange={handleCodeUpload}
       />
 
-      <div className="glass-panel playground-hero">
-        <div>
-          <div className="proof-section-heading" style={{ marginBottom: '10px' }}>
-            <Sparkles size={18} color="var(--secondary-accent)" />
-            <span>Lean Playground</span>
-          </div>
-          <p className="dashboard-editor-copy">
-            A dedicated Lean4 web editor modeled after the official live playground, with a real
-            Infoview and a WebSocket Lean server running in Docker.
-          </p>
-        </div>
-        <div className="playground-hero-meta">
-          <span className="proof-badge">{editorStatus}</span>
-          <span className="proof-badge">{lineCount} lines</span>
-          <span className="proof-badge">{workspaceInfo?.playground_module ?? 'ShannonManifold.Playground'}</span>
-          <span className="proof-badge">{webSocketUrl}</span>
-        </div>
-      </div>
-
-      <div className="glass-panel playground-toolbar">
-        <label className="playground-toolbar-group">
-          <span>Example</span>
-          <select
-            className="input-field playground-select"
-            value={selectedExampleId}
-            onChange={(event) => handleLoadExample(event.target.value)}
-          >
-            {seed?.code && <option value="workspace">Workspace Draft</option>}
-            {sharedDocument && <option value="shared">Shared URL</option>}
-            {selectedExampleId === 'uploaded' && <option value="uploaded">Uploaded File</option>}
-            {EXAMPLES.map((example) => (
-              <option key={example.id} value={example.id}>
-                {example.title}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="playground-toolbar-group playground-title-field">
-          <span>Document</span>
-          <input
-            className="input-field"
-            value={currentTitle}
-            onChange={(event) => setCurrentTitle(event.target.value)}
-            placeholder="Lean document title"
-          />
-        </label>
-
-        <div className="playground-toolbar-actions">
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={handleSyncWorkspace}
-            disabled={workspaceAction !== 'idle'}
-          >
-            <CloudUpload size={16} />
-            {workspaceAction === 'syncing' ? 'Syncing...' : 'Sync Workspace'}
-          </button>
-          <button
-            type="button"
-            className="button-primary"
-            onClick={handlePushGithub}
-            disabled={workspaceAction !== 'idle' || !repositoryPushEnabled}
-          >
-            <Github size={16} />
-            {workspaceAction === 'pushing' ? 'Pushing...' : 'Push to GitHub'}
-          </button>
-          <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
-            <FileUp size={16} />
-            Upload Code
-          </button>
-          <button type="button" className="button-secondary" onClick={handleRestartLean}>
-            <ExternalLink size={16} />
-            Restart Lean
-          </button>
-          <button type="button" className="button-secondary" onClick={handleReset}>
-            <RotateCcw size={16} />
-            Reset
-          </button>
-          <button type="button" className="button-secondary" onClick={handleCopyShareLink}>
-            {shareState === 'copied' ? <Check size={16} /> : <Copy size={16} />}
-            {shareState === 'copied' ? 'Link Copied' : 'Share URL'}
-          </button>
-          {githubRepositoryUrl && (
-            <button type="button" className="button-secondary" onClick={handleOpenRepository}>
-              <ExternalLink size={16} />
-              Repository
-            </button>
-          )}
-        </div>
-      </div>
-
       {workspaceNotice && (
         <div className={`playground-inline-notice is-${workspaceNoticeTone}`}>
           {workspaceNotice}
@@ -844,8 +752,88 @@ export function LeanPlayground({
               </div>
 
               <div ref={infoviewRef} className="playground-infoview-host" />
+            </aside>
+            <aside className="playground-sidebar-panel">
+              <div className="playground-sidebar-section">
+                <label className="playground-toolbar-group">
+                  <span>Example</span>
+                  <select
+                    className="input-field playground-select"
+                    value={selectedExampleId}
+                    onChange={(event) => handleLoadExample(event.target.value)}
+                  >
+                    {seed?.code && <option value="workspace">Workspace Draft</option>}
+                    {sharedDocument && <option value="shared">Shared URL</option>}
+                    {selectedExampleId === 'uploaded' && <option value="uploaded">Uploaded File</option>}
+                    {EXAMPLES.map((example) => (
+                      <option key={example.id} value={example.id}>
+                        {example.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="playground-toolbar-group playground-title-field">
+                  <span>Document</span>
+                  <input
+                    className="input-field"
+                    value={currentTitle}
+                    onChange={(event) => setCurrentTitle(event.target.value)}
+                    placeholder="Lean document title"
+                  />
+                </label>
+              </div>
+
+              <div className="playground-toolbar-actions playground-sidebar-actions">
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleSyncWorkspace}
+                  disabled={workspaceAction !== 'idle'}
+                >
+                  <CloudUpload size={16} />
+                  {workspaceAction === 'syncing' ? 'Syncing...' : 'Sync Workspace'}
+                </button>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={handlePushGithub}
+                  disabled={workspaceAction !== 'idle' || !repositoryPushEnabled}
+                >
+                  <Github size={16} />
+                  {workspaceAction === 'pushing' ? 'Pushing...' : 'Push to GitHub'}
+                </button>
+                <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
+                  <FileUp size={16} />
+                  Upload Code
+                </button>
+                <button type="button" className="button-secondary" onClick={handleRestartLean}>
+                  <ExternalLink size={16} />
+                  Restart Lean
+                </button>
+                <button type="button" className="button-secondary" onClick={handleReset}>
+                  <RotateCcw size={16} />
+                  Reset
+                </button>
+                <button type="button" className="button-secondary" onClick={handleCopyShareLink}>
+                  {shareState === 'copied' ? <Check size={16} /> : <Copy size={16} />}
+                  {shareState === 'copied' ? 'Link Copied' : 'Share URL'}
+                </button>
+                {githubRepositoryUrl && (
+                  <button type="button" className="button-secondary" onClick={handleOpenRepository}>
+                    <ExternalLink size={16} />
+                    Repository
+                  </button>
+                )}
+              </div>
 
               <div className="playground-note-list">
+                <div className="playground-sidebar-meta">
+                  <span className="proof-badge">{editorStatus}</span>
+                  <span className="proof-badge">{lineCount} lines</span>
+                  <span className="proof-badge">{workspaceInfo?.playground_module ?? 'ShannonManifold.Playground'}</span>
+                  <span className="proof-badge">{webSocketUrl}</span>
+                </div>
                 <div className="proof-infoview-card">
                   <div className="proof-infoview-label">Workspace File</div>
                   <div className="proof-infoview-detail">
