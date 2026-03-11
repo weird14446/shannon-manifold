@@ -1,87 +1,121 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { getAgentEvents } from '../../api';
+import { getLeanImportGraph, type LeanImportGraph } from '../../api';
 
-interface GraphData {
-  nodes: { id: string; name: string; val: number }[];
-  links: { source: string; target: string; action: string }[];
+interface GraphNode {
+  id: string;
+  label: string;
+  module_name: string;
+  path: string | null;
+  title: string;
+  imports: number;
+  source_kind: string;
 }
 
-export function AgentGraph() {
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
+interface GraphLink {
+  source: string;
+  target: string;
+  type: string;
+}
+
+interface AgentGraphProps {
+  refreshKey?: number;
+}
+
+export function AgentGraph({ refreshKey = 0 }: AgentGraphProps) {
+  const [graphData, setGraphData] = useState<LeanImportGraph>({ nodes: [], links: [] });
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
-    // Basic agents
-    const initialNodes = [
-      { id: 'Prover', name: 'Prover AI', val: 5 },
-      { id: 'Verifier', name: 'Verifier AI', val: 5 },
-      { id: 'Refuter', name: 'Refuter AI', val: 5 },
-      { id: 'Critic', name: 'Critic AI', val: 5 }
-    ];
+    let isMounted = true;
 
-    const fetchEvents = async () => {
+    const fetchGraph = async () => {
       try {
-        const events = await getAgentEvents();
-        const links = events.map((e: any) => ({
-          source: e.agent_id,
-          target: e.target,
-          action: e.action
-        })).filter((l: any) => l.source && l.target);
-
-        setGraphData({
-          nodes: initialNodes,
-          links: links
-        });
-      } catch (e) {
-        console.error("Agent events fetch error", e);
+        const graph = await getLeanImportGraph();
+        if (isMounted) {
+          setGraphData(graph);
+        }
+      } catch (error) {
+        console.error('Lean import graph fetch error', error);
+        if (isMounted) {
+          setGraphData({ nodes: [], links: [] });
+        }
       }
     };
 
-    fetchEvents();
-    const interval = setInterval(fetchEvents, 3000); // Poll every 3 seconds
-    return () => clearInterval(interval);
-  }, []);
+    void fetchGraph();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [refreshKey]);
 
   useEffect(() => {
-    if (containerRef.current) {
+    const updateDimensions = () => {
+      if (!containerRef.current) {
+        return;
+      }
+
       setDimensions({
         width: containerRef.current.clientWidth,
-        height: containerRef.current.clientHeight
+        height: containerRef.current.clientHeight,
       });
-    }
+    };
+
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
       {typeof window !== 'undefined' && dimensions.width > 0 && (
         <ForceGraph2D
           width={dimensions.width}
           height={dimensions.height}
-          graphData={graphData}
-          nodeLabel="name"
-          nodeColor={() => 'var(--accent-color)'}
-          linkColor={() => 'rgba(255, 255, 255, 0.2)'}
+          graphData={graphData as { nodes: GraphNode[]; links: GraphLink[] }}
+          nodeLabel={(node) =>
+            `${(node as GraphNode).module_name}\n${(node as GraphNode).path ?? ''}\nsource: ${(node as GraphNode).source_kind}`
+          }
+          nodeRelSize={7}
+          nodeColor={(node) =>
+            (node as GraphNode).source_kind === 'proof_workspace'
+              ? '#00d4ff'
+              : (node as GraphNode).source_kind === 'playground'
+                ? '#7b61ff'
+                : '#64f1a8'
+          }
+          linkColor={() => 'rgba(255, 255, 255, 0.18)'}
           linkDirectionalParticles={2}
-          linkDirectionalParticleSpeed={0.01}
+          linkDirectionalParticleSpeed={0.008}
+          linkWidth={1.4}
+          cooldownTicks={120}
+          onNodeDragEnd={(node) => {
+            node.fx = node.x;
+            node.fy = node.y;
+          }}
           nodeCanvasObject={(node, ctx, globalScale) => {
-            const label = node.name as string;
-            const fontSize = 12/globalScale;
-            ctx.font = `${fontSize}px Sans-Serif`;
-            ctx.fillStyle = 'var(--text-primary)';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            
-            // Draw node circle
+            const typedNode = node as GraphNode & { x?: number; y?: number };
+            const label = typedNode.label;
+            const fontSize = 12 / globalScale;
+            const radius = Math.max(6, 5 + typedNode.imports);
+
             ctx.beginPath();
-            ctx.arc(node.x!, node.y!, 5, 0, 2 * Math.PI, false);
-            ctx.fillStyle = '#7b61ff';
+            ctx.arc(typedNode.x ?? 0, typedNode.y ?? 0, radius, 0, 2 * Math.PI, false);
+            ctx.fillStyle =
+              typedNode.source_kind === 'proof_workspace'
+                ? '#00d4ff'
+                : typedNode.source_kind === 'playground'
+                  ? '#7b61ff'
+                  : '#64f1a8';
             ctx.fill();
-            
-            // Draw text
-            ctx.fillStyle = 'white';
-            ctx.fillText(label, node.x!, node.y! + 10);
+
+            ctx.font = `${fontSize}px Sans-Serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, typedNode.x ?? 0, (typedNode.y ?? 0) + radius + 4);
           }}
         />
       )}

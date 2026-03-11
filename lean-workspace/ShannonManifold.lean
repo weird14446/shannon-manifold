@@ -1,2 +1,1 @@
-import ShannonManifold.Library.Basic
-import ShannonManifold.Library.Triangle
+-- Root package file for the Shannon Manifold Lean workspace.

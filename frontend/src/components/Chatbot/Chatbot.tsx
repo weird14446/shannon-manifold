@@ -1,21 +1,35 @@
 import { useState, useRef, useEffect } from 'react';
-import { LockKeyhole, Send, Bot, User } from 'lucide-react';
-import { chatWithOracle, type AuthUser } from '../../api';
+import { Bot, Code2, LockKeyhole, Send, Sparkles, User } from 'lucide-react';
+import { chatWithOracle, type AuthUser, type ChatCodeContextPayload } from '../../api';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  suggestedCode?: string | null;
+  suggestedLanguage?: string | null;
 }
 
 interface ChatbotProps {
   currentUser: AuthUser | null;
   onOpenAuth: () => void;
   onLogout: () => void;
+  codeContext?: ChatCodeContextPayload | null;
+  onApplySuggestedCode?: (payload: { code: string; title: string }) => void;
 }
 
-export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
+export function Chatbot({
+  currentUser,
+  onOpenAuth,
+  onLogout,
+  codeContext = null,
+  onApplySuggestedCode,
+}: ChatbotProps) {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hello! I am the Shannon Manifold Theorem Oracle. How can I assist you with your mathematical proofs today?' }
+    {
+      role: 'assistant',
+      content:
+        'Hello! I am the Shannon Manifold Theorem Oracle. Ask about proofs, Lean4, imports, or have me draft code with you.',
+    },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -43,8 +57,20 @@ export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
     setIsLoading(true);
 
     try {
-      const { reply } = await chatWithOracle(input, messages);
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+      const { reply, suggested_code, suggested_language } = await chatWithOracle(
+        input,
+        messages,
+        codeContext,
+      );
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: reply,
+          suggestedCode: suggested_code ?? null,
+          suggestedLanguage: suggested_language ?? null,
+        },
+      ]);
     } catch (error) {
       console.error('Chat error:', error);
 
@@ -56,7 +82,10 @@ export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
           { role: 'assistant', content: 'Your session expired. Please sign in again to continue.' }
         ]);
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: 'Error communicating with the Oracle.' }]);
+        const detail =
+          (error as any)?.response?.data?.detail ||
+          'Error communicating with the Oracle.';
+        setMessages((prev) => [...prev, { role: 'assistant', content: String(detail) }]);
       }
     } finally {
       setIsLoading(false);
@@ -65,6 +94,24 @@ export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px' }}>
+      {codeContext && (
+        <div className="chat-context-card">
+          <div className="chat-context-label">
+            <Code2 size={14} />
+            Current Lean File
+          </div>
+          <div className="chat-context-title">{codeContext.title}</div>
+          <div className="chat-context-meta">
+            {codeContext.module_name || 'Unsaved module'}
+            {codeContext.path ? ` · ${codeContext.path}` : ''}
+          </div>
+          <div className="chat-context-helper">
+            The Oracle will use the current playground code as context and can return a revised
+            Lean file.
+          </div>
+        </div>
+      )}
+
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', paddingRight: '8px' }}>
         {messages.map((msg, index) => (
           <div 
@@ -83,9 +130,36 @@ export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
               {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
               <span>{msg.role === 'assistant' ? 'Oracle' : 'You'}</span>
             </div>
-            <div style={{ lineHeight: 1.4, fontSize: '0.95rem' }}>
+            <div style={{ lineHeight: 1.4, fontSize: '0.95rem', whiteSpace: 'pre-wrap' }}>
               {msg.content}
             </div>
+            {msg.role === 'assistant' && msg.suggestedCode && (
+              <div className="chat-code-suggestion">
+                <div className="chat-code-suggestion-head">
+                  <div className="chat-code-suggestion-title">
+                    <Sparkles size={14} />
+                    Suggested {msg.suggestedLanguage || 'code'}
+                  </div>
+                  {onApplySuggestedCode && (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() =>
+                        onApplySuggestedCode({
+                          code: msg.suggestedCode ?? '',
+                          title: codeContext?.title || 'Oracle Draft',
+                        })
+                      }
+                    >
+                      Apply to Playground
+                    </button>
+                  )}
+                </div>
+                <pre className="chat-code-preview">
+                  <code>{msg.suggestedCode}</code>
+                </pre>
+              </div>
+            )}
           </div>
         ))}
         {isLoading && (
@@ -111,7 +185,13 @@ export function Chatbot({ currentUser, onOpenAuth, onLogout }: ChatbotProps) {
         <input 
           type="text" 
           className="input-field" 
-          placeholder={currentUser ? 'Ask a question...' : 'Login required to use the Oracle'} 
+          placeholder={
+            currentUser
+              ? codeContext
+                ? 'Ask for a Lean edit, theorem draft, or import help...'
+                : 'Ask a question or request a Lean draft...'
+              : 'Login required to use the Oracle'
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}

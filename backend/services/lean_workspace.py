@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import hashlib
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,6 +14,39 @@ from config import Settings
 
 class LeanWorkspaceError(RuntimeError):
     pass
+
+
+def _split_configured_playground_path(settings: Settings) -> tuple[Path, str]:
+    configured_path = Path(settings.lean_playground_file)
+    parent = configured_path.parent
+    fallback_stem = configured_path.stem or "Playground"
+    return parent, fallback_stem
+
+
+def _title_to_lean_stem(title: str, fallback_stem: str) -> str:
+    normalized_title = title.strip()
+    parts = re.findall(r"[A-Za-z0-9]+", normalized_title)
+    if parts:
+        stem = "".join(part[:1].upper() + part[1:] for part in parts)
+        if stem[0].isdigit():
+            stem = f"Doc{stem}"
+        return stem
+
+    if normalized_title:
+        digest = hashlib.sha1(normalized_title.encode("utf-8")).hexdigest()[:8]
+        return f"Document{digest}"
+
+    return fallback_stem
+
+
+def resolve_workspace_target(settings: Settings, title: str | None = None) -> dict[str, str]:
+    parent, fallback_stem = _split_configured_playground_path(settings)
+    stem = _title_to_lean_stem(title or "", fallback_stem)
+    relative_path = (parent / f"{stem}.lean").as_posix() if str(parent) != "." else f"{stem}.lean"
+    return {
+        "path": relative_path,
+        "module": _path_to_module(relative_path),
+    }
 
 
 def _resolve_workspace_file(settings: Settings, relative_path: str | None = None) -> Path:
@@ -58,31 +93,133 @@ def write_workspace_file(
     settings: Settings,
     *,
     code: str,
+    title: str | None = None,
     relative_path: str | None = None,
 ) -> dict[str, str]:
-    target_path = _resolve_workspace_file(settings, relative_path)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    target_path.write_text(code, encoding="utf-8")
+    resolved_target = (
+        {"path": relative_path, "module": _path_to_module(relative_path)}
+        if relative_path
+        else resolve_workspace_target(settings, title)
+    )
+    target_path = _resolve_workspace_file(settings, resolved_target["path"])
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(code, encoding="utf-8")
+    except OSError as exc:
+        raise LeanWorkspaceError(
+            "Failed to write the Lean workspace file. Check that the workspace mount exists and that backend/lean-server containers run with your host UID/GID."
+        ) from exc
 
     relative = target_path.relative_to(settings.lean_workspace_dir).as_posix()
     return {
         "path": relative,
-        "module": _path_to_module(relative),
+        "module": resolved_target["module"],
     }
 
 
-def get_workspace_info(settings: Settings) -> dict[str, object]:
-    playground_relative_path = settings.lean_playground_file
+def _remove_empty_parent_dirs(path: Path, *, stop_at: Path) -> None:
+    current = path.parent
+    while current != stop_at and stop_at in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def delete_workspace_file(
+    settings: Settings,
+    *,
+    relative_path: str | None,
+) -> None:
+    if not relative_path:
+        return
+
+    target_path = _resolve_workspace_file(settings, relative_path)
+    workspace_root = settings.lean_workspace_dir.resolve()
+
+    if target_path.exists():
+        target_path.unlink()
+        _remove_empty_parent_dirs(target_path, stop_at=workspace_root)
+
+    build_root = (workspace_root / ".lake" / "build" / "lib" / "lean").resolve()
+    relative_prefix = Path(relative_path).with_suffix("")
+    artifact_targets = [
+        build_root / relative_prefix.with_suffix(".olean"),
+        build_root / relative_prefix.with_suffix(".ilean"),
+        build_root / relative_prefix.with_suffix(".trace"),
+        build_root / relative_prefix.with_suffix(".olean.hash"),
+        build_root / relative_prefix.with_suffix(".ilean.hash"),
+    ]
+
+    for artifact in artifact_targets:
+        if artifact.exists():
+            artifact.unlink()
+            _remove_empty_parent_dirs(artifact, stop_at=build_root)
+
+
+def get_workspace_info(settings: Settings, title: str | None = None) -> dict[str, object]:
+    playground_target = (
+        resolve_workspace_target(settings, title)
+        if title is not None
+        else {
+            "path": settings.lean_playground_file,
+            "module": _path_to_module(settings.lean_playground_file),
+        }
+    )
     return {
         "workspace_dir": str(settings.lean_workspace_dir),
-        "playground_file": playground_relative_path,
-        "playground_module": _path_to_module(playground_relative_path),
+        "playground_file": playground_target["path"],
+        "playground_module": playground_target["module"],
         "repository_subdir": settings.lean_repository_subdir,
         "repository_url": settings.github_repository_url or None,
         "repository_branch": settings.github_repository_branch,
         "can_push": bool(settings.github_repository_url and settings.github_access_token),
         "importable_modules": list_importable_modules(settings),
     }
+
+
+async def build_workspace_module(
+    settings: Settings,
+    *,
+    relative_workspace_path: str,
+    module_name: str,
+) -> dict[str, object]:
+    if not settings.lean_server_api_url:
+        return {}
+
+    endpoint = f"{settings.lean_server_api_url}/build-module"
+    payload = {
+        "path": relative_workspace_path,
+        "module": module_name,
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        try:
+            response = await client.post(endpoint, json=payload)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip() or str(exc)
+            raise LeanWorkspaceError(f"Lean module build failed: {detail}") from exc
+        except httpx.HTTPError as exc:
+            raise LeanWorkspaceError(f"Lean server build request failed: {exc}") from exc
+
+    return response.json()
+
+
+def build_workspace_module_sync(
+    settings: Settings,
+    *,
+    relative_workspace_path: str,
+    module_name: str,
+) -> dict[str, object]:
+    return asyncio.run(
+        build_workspace_module(
+            settings,
+            relative_workspace_path=relative_workspace_path,
+            module_name=module_name,
+        )
+    )
 
 
 def _parse_github_repository(url: str) -> tuple[str, str]:
@@ -101,7 +238,52 @@ def _parse_github_repository(url: str) -> tuple[str, str]:
     if not match:
         raise LeanWorkspaceError("GITHUB_REPOSITORY_URL must point to a repository root.")
 
-    return match.group(1), match.group(2)
+    owner, repo = match.group(1), match.group(2)
+    if (owner, repo) in {
+        ("owner", "repository"),
+        ("your-org", "your-repo"),
+        ("your-user", "your-repo"),
+    }:
+        raise LeanWorkspaceError(
+            "GITHUB_REPOSITORY_URL is still set to a placeholder value. Update .env with your real GitHub repository URL."
+        )
+
+    return owner, repo
+
+
+async def _ensure_github_repository_access(
+    client: httpx.AsyncClient,
+    *,
+    owner: str,
+    repo: str,
+    branch: str,
+    headers: dict[str, str],
+) -> None:
+    repo_response = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        headers=headers,
+    )
+    if repo_response.status_code == 404:
+        raise LeanWorkspaceError(
+            "GitHub repository was not found. Check GITHUB_REPOSITORY_URL and confirm that GITHUB_ACCESS_TOKEN can access that repository."
+        )
+    if repo_response.status_code >= 400:
+        raise LeanWorkspaceError(
+            f"GitHub repository lookup failed: {repo_response.text.strip()}"
+        )
+
+    branch_response = await client.get(
+        f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}",
+        headers=headers,
+    )
+    if branch_response.status_code == 404:
+        raise LeanWorkspaceError(
+            f"GitHub branch `{branch}` was not found in {owner}/{repo}. Check GITHUB_REPOSITORY_BRANCH."
+        )
+    if branch_response.status_code >= 400:
+        raise LeanWorkspaceError(
+            f"GitHub branch lookup failed: {branch_response.text.strip()}"
+        )
 
 
 async def push_workspace_file_to_github(
@@ -125,6 +307,14 @@ async def push_workspace_file_to_github(
     sha: str | None = None
 
     async with httpx.AsyncClient(timeout=45.0) as client:
+        await _ensure_github_repository_access(
+            client,
+            owner=owner,
+            repo=repo,
+            branch=settings.github_repository_branch,
+            headers=headers,
+        )
+
         metadata_response = await client.get(
             api_base,
             headers=headers,

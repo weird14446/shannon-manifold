@@ -92,3 +92,32 @@ def get_current_user(
         raise _credentials_exception()
 
     return user
+
+
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if credentials is None:
+        return None
+
+    if credentials.scheme.lower() != "bearer":
+        raise _credentials_exception()
+
+    settings = get_settings()
+
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        user_id = int(payload["sub"])
+    except (InvalidTokenError, KeyError, TypeError, ValueError):
+        raise _credentials_exception() from None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise _credentials_exception()
+
+    return user

@@ -9,7 +9,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
-    | sh -s -- -y --default-toolchain leanprover/lean4:stable
+    | sh -s -- -y --default-toolchain leanprover/lean4:v4.28.0
 
 WORKDIR /app
 

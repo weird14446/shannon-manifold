@@ -48,6 +48,8 @@ lean-server/LeanProject/build/
 lean-workspace/.lake/
 lean-workspace/.lean/
 lean-workspace/build/
+lean-workspace/ShannonManifold/*.lean
+!lean-workspace/ShannonManifold/Playground.lean
 
 # IDE / Editor
 .idea/

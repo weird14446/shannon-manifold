@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   Check,
-  CloudUpload,
   Copy,
   ExternalLink,
   FileUp,
@@ -14,7 +13,7 @@ import { LeanMonaco, LeanMonacoEditor, type LeanMonacoOptions } from 'lean4monac
 import {
   getLeanWorkspaceInfo,
   pushLeanPlaygroundToGithub,
-  syncLeanPlaygroundToWorkspace,
+  type ChatCodeContextPayload,
   type AuthUser,
   type LeanWorkspaceInfo,
 } from '../../api';
@@ -24,54 +23,10 @@ import 'lean4monaco/dist/css/vscode_webview.css';
 const PLAYGROUND_FILE_PATH = 'ShannonManifold/Playground.lean';
 const PLAYGROUND_STORAGE_KEY = 'shannon-manifold-lean-playground';
 
-const EXAMPLES = [
-  {
-    id: 'hello',
-    title: 'Hello Lean',
-    description: 'Start with the shared Shannon Manifold workspace modules.',
-    code: `import ShannonManifold
-
-open ShannonManifold
-
-#eval banner
-#eval proofGreeting
-
-example : 2 + 2 = 4 := by
-  decide
-
-#check pythagoreanStatement
-`,
-  },
-  {
-    id: 'functions',
-    title: 'Functions',
-    description: 'A small definition and a theorem about it.',
-    code: `def twice (n : Nat) : Nat :=
-  n + n
-
-#eval twice 7
-
-theorem twice_zero : twice 0 = 0 := by
-  rfl
-`,
-  },
-  {
-    id: 'structures',
-    title: 'Structure',
-    description: 'Simple data declarations and pattern matching.',
-    code: `structure Point where
-  x : Nat
-  y : Nat
-
-def swapPoint (p : Point) : Point :=
-  { x := p.y, y := p.x }
-
-#eval swapPoint { x := 2, y := 5 }
-`,
-  },
-] as const;
-
-const DEFAULT_EXAMPLE = EXAMPLES[0];
+const DEFAULT_DOCUMENT: PlaygroundDocument = {
+  code: '-- Start writing Lean here.\n',
+  title: 'Playground',
+};
 
 export interface LeanPlaygroundSeed {
   code: string;
@@ -84,12 +39,15 @@ interface LeanPlaygroundProps {
   currentUser: AuthUser | null;
   onOpenAuth: () => void;
   onLogout: () => void;
+  onDocumentChange?: (snapshot: ChatCodeContextPayload) => void;
 }
 
 interface PlaygroundDocument {
   code: string;
   title: string;
 }
+
+const toEditorModelPath = (workspacePath: string) => `/${workspacePath.replace(/^\/+/, '')}`;
 
 const getDefaultWebSocketUrl = () => {
   if (typeof window === 'undefined') {
@@ -169,8 +127,8 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
   return (
     readDocumentFromUrl() ??
     readDocumentFromStorage() ?? {
-      code: DEFAULT_EXAMPLE.code,
-      title: DEFAULT_EXAMPLE.title,
+      code: DEFAULT_DOCUMENT.code,
+      title: DEFAULT_DOCUMENT.title,
     }
   );
 };
@@ -287,23 +245,27 @@ export function LeanPlayground({
   currentUser,
   onOpenAuth,
   onLogout,
+  onDocumentChange,
 }: LeanPlaygroundProps) {
   const sharedDocument = readDocumentFromUrl();
   const initialDocument = resolveInitialDocument(seed);
   const githubRepositoryUrl = import.meta.env.VITE_GITHUB_REPOSITORY_URL?.trim();
   const [currentCode, setCurrentCode] = useState(initialDocument.code);
   const [currentTitle, setCurrentTitle] = useState(initialDocument.title);
-  const [selectedExampleId, setSelectedExampleId] = useState<string>(
-    seed?.code ? 'workspace' : sharedDocument ? 'shared' : DEFAULT_EXAMPLE.id,
+  const [documentSource, setDocumentSource] = useState<string>(
+    seed?.code ? 'workspace' : sharedDocument ? 'shared' : 'local',
   );
   const [editorStatus, setEditorStatus] = useState<'booting' | 'ready' | 'error'>('booting');
   const [editorError, setEditorError] = useState('');
   const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [baselineDocument, setBaselineDocument] = useState(initialDocument);
   const [workspaceInfo, setWorkspaceInfo] = useState<LeanWorkspaceInfo | null>(null);
-  const [workspaceAction, setWorkspaceAction] = useState<'idle' | 'syncing' | 'pushing'>('idle');
+  const [workspaceAction, setWorkspaceAction] = useState<'idle' | 'pushing'>('idle');
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [workspaceNoticeTone, setWorkspaceNoticeTone] = useState<'success' | 'error'>('success');
+  const [savedWorkspacePath, setSavedWorkspacePath] = useState(PLAYGROUND_FILE_PATH);
+  const [savedWorkspaceModule, setSavedWorkspaceModule] = useState('ShannonManifold.Playground');
+  const editorModelPath = toEditorModelPath(savedWorkspacePath);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const infoviewRef = useRef<HTMLDivElement>(null);
@@ -328,6 +290,16 @@ export function LeanPlayground({
 
     latestCodeRef.current = currentCode;
   }, [currentCode, currentTitle]);
+
+  useEffect(() => {
+    onDocumentChange?.({
+      title: currentTitle,
+      content: currentCode,
+      language: 'Lean4',
+      module_name: savedWorkspaceModule,
+      path: savedWorkspacePath,
+    });
+  }, [currentCode, currentTitle, onDocumentChange, savedWorkspaceModule, savedWorkspacePath]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -368,7 +340,7 @@ export function LeanPlayground({
           return;
         }
 
-        await leanEditor.start(editorRef.current, PLAYGROUND_FILE_PATH, latestCodeRef.current);
+        await leanEditor.start(editorRef.current, editorModelPath, latestCodeRef.current);
         if (isCancelled) {
           return;
         }
@@ -407,7 +379,7 @@ export function LeanPlayground({
       leanEditorRef.current = null;
       leanMonacoRef.current = null;
     };
-  }, []);
+  }, [editorModelPath]);
 
   useEffect(() => {
     if (!infoviewRef.current) {
@@ -458,6 +430,8 @@ export function LeanPlayground({
         const info = await getLeanWorkspaceInfo();
         if (isMounted) {
           setWorkspaceInfo(info);
+          setSavedWorkspacePath(info.playground_file);
+          setSavedWorkspaceModule(info.playground_module);
         }
       } catch (error) {
         console.error('Failed to load Lean workspace info:', error);
@@ -483,23 +457,23 @@ export function LeanPlayground({
     applyDocument({
       code: seed.code,
       title: seed.title,
-      exampleId: 'workspace',
+      source: 'workspace',
     });
   }, [seed?.code, seed?.revision, seed?.title]);
 
   const applyDocument = ({
     code,
     title,
-    exampleId,
+    source,
   }: {
     code: string;
     title: string;
-    exampleId: string;
+    source: string;
   }) => {
     latestCodeRef.current = code;
     setCurrentCode(code);
     setCurrentTitle(title);
-    setSelectedExampleId(exampleId);
+    setDocumentSource(source);
     setBaselineDocument({ code, title });
     setShareState('idle');
 
@@ -518,85 +492,16 @@ export function LeanPlayground({
     }
   };
 
-  const handleLoadExample = (exampleId: string) => {
-    if (exampleId === 'workspace' && seed?.code) {
-      applyDocument({
-        code: seed.code,
-        title: seed.title,
-        exampleId: 'workspace',
-      });
-      return;
-    }
-
-    if (exampleId === 'shared') {
-      if (!sharedDocument) {
-        return;
-      }
-
-      applyDocument({
-        code: sharedDocument.code,
-        title: sharedDocument.title,
-        exampleId: 'shared',
-      });
-      return;
-    }
-
-    const example = EXAMPLES.find((item) => item.id === exampleId);
-    if (!example) {
-      return;
-    }
-
-    applyDocument({
-      code: example.code,
-      title: example.title,
-      exampleId: example.id,
-    });
-  };
-
   const handleReset = () => {
     applyDocument({
       code: baselineDocument.code,
       title: baselineDocument.title,
-      exampleId: selectedExampleId,
+      source: documentSource,
     });
   };
 
   const handleRestartLean = () => {
     leanMonacoRef.current?.restart();
-  };
-
-  const handleSyncWorkspace = async () => {
-    if (!currentUser) {
-      onOpenAuth();
-      return;
-    }
-
-    setWorkspaceAction('syncing');
-    setWorkspaceNotice('');
-
-    try {
-      const response = await syncLeanPlaygroundToWorkspace({
-        code: currentCode,
-        title: currentTitle,
-      });
-      setWorkspaceInfo(response);
-      setWorkspaceNoticeTone('success');
-      setWorkspaceNotice(`Synced ${response.saved_module} into the Lean workspace.`);
-    } catch (error: any) {
-      console.error('Failed to sync Lean workspace:', error);
-      setWorkspaceNoticeTone('error');
-      if (error?.response?.status === 401) {
-        onLogout();
-        onOpenAuth();
-        setWorkspaceNotice('Your session expired. Please sign in again.');
-      } else {
-        setWorkspaceNotice(
-          error?.response?.data?.detail ?? 'Failed to sync the Lean playground file.',
-        );
-      }
-    } finally {
-      setWorkspaceAction('idle');
-    }
   };
 
   const handlePushGithub = async () => {
@@ -614,11 +519,18 @@ export function LeanPlayground({
         title: currentTitle,
       });
       setWorkspaceInfo(response);
+      setSavedWorkspacePath(response.saved_path);
+      setSavedWorkspaceModule(response.saved_module);
+      leanMonacoRef.current?.restart();
       setWorkspaceNoticeTone('success');
       setWorkspaceNotice(
-        response.remote_content_url
-          ? `Pushed ${response.saved_module} to GitHub.`
-          : `Updated ${response.saved_module} in the configured repository.`,
+        response.pushed
+          ? response.remote_content_url
+            ? `Built ${response.saved_module} for import and pushed it to GitHub.`
+            : `Built ${response.saved_module} for import and updated the configured repository.`
+          : response.repository_url
+            ? `Built ${response.saved_module} for import locally. Set GITHUB_ACCESS_TOKEN to push it to GitHub.`
+            : `Built ${response.saved_module} for import in the Lean workspace.`,
       );
     } catch (error: any) {
       console.error('Failed to push Lean playground file:', error);
@@ -672,7 +584,7 @@ export function LeanPlayground({
       applyDocument({
         code,
         title,
-        exampleId: 'uploaded',
+        source: 'uploaded',
       });
     } catch (error) {
       console.error('Failed to read uploaded Lean code:', error);
@@ -694,7 +606,6 @@ export function LeanPlayground({
   const lineCount = Math.max(currentCode.split('\n').length, 1);
   const webSocketUrl = import.meta.env.VITE_LEAN_WS_URL || getDefaultWebSocketUrl();
   const workspaceModules = workspaceInfo?.importable_modules ?? [];
-  const repositoryPushEnabled = Boolean(workspaceInfo?.repository_url);
 
   return (
     <section className="playground-screen">
@@ -718,12 +629,13 @@ export function LeanPlayground({
             <div>
               <div className="formal-editor-title">{currentTitle}</div>
               <div className="formal-editor-subtitle">
-                {selectedExampleId === 'workspace'
+                {documentSource === 'workspace'
                   ? 'Loaded from your proof workspace'
-                  : selectedExampleId === 'shared'
+                  : documentSource === 'shared'
                     ? 'Loaded from a shared URL'
-                    : EXAMPLES.find((example) => example.id === selectedExampleId)?.description ??
-                      'Lean sandbox'}
+                    : documentSource === 'uploaded'
+                      ? 'Loaded from an uploaded Lean file'
+                      : 'Lean workspace document'}
               </div>
             </div>
             <div className="formal-editor-icons">
@@ -731,7 +643,7 @@ export function LeanPlayground({
                 {editorStatus === 'booting' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}
                 {editorStatus === 'booting' ? 'Booting Lean' : 'Lean4'}
               </span>
-              <span>{PLAYGROUND_FILE_PATH}</span>
+              <span>{savedWorkspacePath}</span>
             </div>
           </div>
 
@@ -755,24 +667,6 @@ export function LeanPlayground({
             </aside>
             <aside className="playground-sidebar-panel">
               <div className="playground-sidebar-section">
-                <label className="playground-toolbar-group">
-                  <span>Example</span>
-                  <select
-                    className="input-field playground-select"
-                    value={selectedExampleId}
-                    onChange={(event) => handleLoadExample(event.target.value)}
-                  >
-                    {seed?.code && <option value="workspace">Workspace Draft</option>}
-                    {sharedDocument && <option value="shared">Shared URL</option>}
-                    {selectedExampleId === 'uploaded' && <option value="uploaded">Uploaded File</option>}
-                    {EXAMPLES.map((example) => (
-                      <option key={example.id} value={example.id}>
-                        {example.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
                 <label className="playground-toolbar-group playground-title-field">
                   <span>Document</span>
                   <input
@@ -787,21 +681,12 @@ export function LeanPlayground({
               <div className="playground-toolbar-actions playground-sidebar-actions">
                 <button
                   type="button"
-                  className="button-secondary"
-                  onClick={handleSyncWorkspace}
-                  disabled={workspaceAction !== 'idle'}
-                >
-                  <CloudUpload size={16} />
-                  {workspaceAction === 'syncing' ? 'Syncing...' : 'Sync Workspace'}
-                </button>
-                <button
-                  type="button"
                   className="button-primary"
                   onClick={handlePushGithub}
-                  disabled={workspaceAction !== 'idle' || !repositoryPushEnabled}
+                  disabled={workspaceAction !== 'idle'}
                 >
                   <Github size={16} />
-                  {workspaceAction === 'pushing' ? 'Pushing...' : 'Push to GitHub'}
+                  {workspaceAction === 'pushing' ? 'Saving...' : 'Save / Push'}
                 </button>
                 <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
                   <FileUp size={16} />
@@ -831,13 +716,13 @@ export function LeanPlayground({
                 <div className="playground-sidebar-meta">
                   <span className="proof-badge">{editorStatus}</span>
                   <span className="proof-badge">{lineCount} lines</span>
-                  <span className="proof-badge">{workspaceInfo?.playground_module ?? 'ShannonManifold.Playground'}</span>
+                  <span className="proof-badge">{savedWorkspaceModule}</span>
                   <span className="proof-badge">{webSocketUrl}</span>
                 </div>
                 <div className="proof-infoview-card">
                   <div className="proof-infoview-label">Workspace File</div>
                   <div className="proof-infoview-detail">
-                    {workspaceInfo?.playground_file ?? PLAYGROUND_FILE_PATH}
+                    {savedWorkspacePath}
                   </div>
                 </div>
                 <div className="proof-infoview-card">

@@ -50,20 +50,21 @@ The local stack now includes:
 
 - The frontend chatbot talks to the backend `POST /chat/` endpoint.
 - By default, the backend can stay in `mock` mode for local development.
-- To switch the chatbot to a real LLM API, configure the root `.env` like this:
+- To switch the chatbot to Gemini, configure the root `.env` like this:
 
 ```bash
-CHATBOT_PROVIDER=openai_compatible
-CHATBOT_API_BASE_URL=https://api.openai.com/v1
-CHATBOT_API_KEY=your-real-api-key
-CHATBOT_MODEL=gpt-4o
+CHATBOT_PROVIDER=gemini
+CHATBOT_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+CHATBOT_API_KEY=your-gemini-api-key
+CHATBOT_MODEL=gemini-2.5-flash
 CHATBOT_SYSTEM_PROMPT=You are Shannon Manifold Oracle, a precise assistant for proofs, Lean4, Rocq, and theorem debugging.
 CHATBOT_TEMPERATURE=0.2
 CHATBOT_TIMEOUT_SECONDS=45
 CHATBOT_MAX_HISTORY_MESSAGES=12
 ```
 
-- The backend expects an OpenAI-compatible `POST /chat/completions` API.
+- `CHATBOT_PROVIDER=gemini` uses the native Gemini `models/{model}:generateContent` API.
+- `CHATBOT_PROVIDER=openai_compatible` is still supported if you later want an OpenAI-style backend.
 - If `CHATBOT_PROVIDER=mock`, the previous deterministic fallback response is used.
 
 Example direct API call:
@@ -102,15 +103,12 @@ curl http://localhost:8000/chat/ \
 ## Shared Lean Workspace
 
 - The repository now includes a real Lean 4 package under `lean-workspace/`.
-- The root package is `ShannonManifold`, and the live playground file is `lean-workspace/ShannonManifold/Playground.lean`.
-- Example reusable modules are included under `lean-workspace/ShannonManifold/Library/`.
-- Because the `lean-server` container and the backend both mount the same `lean-workspace/` directory, playground code can import repository modules directly, for example:
+- The root package is `ShannonManifold`, and the default playground save target is `lean-workspace/ShannonManifold/Playground.lean`.
+- `lean-workspace/` now depends on `mathlib`, so the playground and shared modules can import it directly.
+- Because the `lean-server` container and the backend both mount the same `lean-workspace/` directory, playground code can import modules that you save into the shared Lean workspace:
 
 ```lean
-import ShannonManifold
-import ShannonManifold.Library.Triangle
-
-#check ShannonManifold.pythagoreanStatement
+import YourSavedModule
 ```
 
 - Local verification for the shared Lean project:

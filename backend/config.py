@@ -10,10 +10,10 @@ load_dotenv(find_dotenv(usecwd=True))
 
 class Settings:
     def __init__(self) -> None:
-        self.chatbot_model = os.getenv("CHATBOT_MODEL", "gpt-4o")
-        self.chatbot_provider = os.getenv("CHATBOT_PROVIDER", "mock").strip().lower()
+        self.chatbot_model = os.getenv("CHATBOT_MODEL", "gemini-2.5-flash")
+        self.chatbot_provider = os.getenv("CHATBOT_PROVIDER", "gemini").strip().lower()
         self.chatbot_api_base_url = os.getenv(
-            "CHATBOT_API_BASE_URL", "https://api.openai.com/v1"
+            "CHATBOT_API_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
         ).rstrip("/")
         self.chatbot_api_key = os.getenv("CHATBOT_API_KEY", "").strip()
         self.chatbot_system_prompt = os.getenv(
@@ -30,6 +30,19 @@ class Settings:
         self.chatbot_max_history_messages = int(
             os.getenv("CHATBOT_MAX_HISTORY_MESSAGES", "12")
         )
+        self.embedding_provider = os.getenv("EMBEDDING_PROVIDER", "local_hash").strip().lower()
+        self.embedding_api_base_url = os.getenv(
+            "EMBEDDING_API_BASE_URL", self.chatbot_api_base_url
+        ).rstrip("/")
+        self.embedding_api_key = os.getenv("EMBEDDING_API_KEY", self.chatbot_api_key).strip()
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small").strip()
+        self.embedding_timeout_seconds = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "45"))
+        self.embedding_vector_size = int(os.getenv("EMBEDDING_VECTOR_SIZE", "256"))
+        self.qdrant_url = os.getenv("QDRANT_URL", "http://qdrant:6333").strip()
+        self.qdrant_api_key = os.getenv("QDRANT_API_KEY", "").strip()
+        self.qdrant_collection_name = os.getenv(
+            "QDRANT_COLLECTION_NAME", "shannon_manifold_chunks"
+        ).strip()
 
         self.mysql_host = os.getenv("MYSQL_HOST", "mysql")
         self.mysql_port = int(os.getenv("MYSQL_PORT", "3306"))
@@ -59,6 +72,7 @@ class Settings:
         self.lean_workspace_dir = Path(
             os.getenv("LEAN_WORKSPACE_DIR", "/workspace/lean-workspace")
         )
+        self.lean_server_api_url = os.getenv("LEAN_SERVER_API_URL", "http://lean-server:8080").rstrip("/")
         self.lean_playground_file = os.getenv(
             "LEAN_PLAYGROUND_FILE", "ShannonManifold/Playground.lean"
         ).strip("/")
