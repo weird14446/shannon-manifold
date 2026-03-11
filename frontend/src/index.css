@@ -970,11 +970,13 @@ h1, h2, h3, h4, h5, h6 {
 .playground-infoview-host {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: rgba(3, 6, 11, 0.95);
 }
 
 .playground-infoview-host iframe {
+  display: block;
   width: 100%;
   height: 100%;
   border: none;

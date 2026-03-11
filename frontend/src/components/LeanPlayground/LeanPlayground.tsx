@@ -189,8 +189,16 @@ const applyInfoviewFrameTheme = (iframe: HTMLIFrameElement) => {
     styleElement.id = INFOVIEW_THEME_STYLE_ID;
     styleElement.textContent = `
       html,
-      body,
+      body {
+        height: 100% !important;
+        overflow: auto !important;
+        background: transparent !important;
+        color: #eef6ff !important;
+      }
+
       #react_root {
+        min-height: 100% !important;
+        overflow: auto !important;
         background: transparent !important;
         color: #eef6ff !important;
       }
@@ -203,6 +211,23 @@ const applyInfoviewFrameTheme = (iframe: HTMLIFrameElement) => {
           linear-gradient(180deg, rgba(6, 10, 18, 0.98), rgba(3, 6, 11, 0.98)) !important;
       }
 
+      body::-webkit-scrollbar,
+      #react_root::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      body::-webkit-scrollbar-track,
+      #react_root::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      body::-webkit-scrollbar-thumb,
+      #react_root::-webkit-scrollbar-thumb {
+        background: rgba(34, 199, 255, 0.32);
+        border-radius: 999px;
+      }
+
       #react_root,
       #react_root > div,
       #react_root details,
@@ -212,6 +237,10 @@ const applyInfoviewFrameTheme = (iframe: HTMLIFrameElement) => {
       #react_root article {
         background-color: transparent !important;
         color: inherit !important;
+      }
+
+      #react_root > div:first-child {
+        min-height: 100% !important;
       }
 
       #react_root a,
