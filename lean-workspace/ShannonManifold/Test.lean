@@ -1,3 +1,1 @@
-import ShannonManifold.PeanoAxioms
-
-#check MySpace.MyNat
+def hello : Nat := 1
