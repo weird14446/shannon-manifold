@@ -1,14 +1,13 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Boolean, Column, Integer, String, Text
 
-Base = declarative_base()
+from database import Base
 
 class Theorem(Base):
     __tablename__ = "theorems"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
-    statement = Column(Text)
-    proof_language = Column(String) # e.g., 'Lean4', 'Rocq'
+    title = Column(String(255), index=True, nullable=False)
+    statement = Column(Text, nullable=False)
+    proof_language = Column(String(64), nullable=False)  # e.g., 'Lean4', 'Rocq'
     is_verified = Column(Boolean, default=False)
-    content = Column(Text) # The actual proof or notes
+    content = Column(Text)  # The actual proof or notes

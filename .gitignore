@@ -33,10 +33,21 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+frontend/test-results/
 
 # SQLite
 *.db
 *.sqlite3
+
+# Generated proof artifacts
+backend/storage/
+tmp/pdfs/
+lean-server/LeanProject/.lake/
+lean-server/LeanProject/.lean/
+lean-server/LeanProject/build/
+lean-workspace/.lake/
+lean-workspace/.lean/
+lean-workspace/build/
 
 # IDE / Editor
 .idea/

@@ -1,9 +1,14 @@
 {
   "name": "Shannon Manifold Dev Environment",
-  "dockerComposeFile": "../docker-compose.yml",
-  "service": "backend",
-  "workspaceFolder": "/app",
-  
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/shannon-manifold",
+  "mounts": [
+    "source=shannon-manifold-frontend-node_modules,target=${containerWorkspaceFolder}/frontend/node_modules,type=volume"
+  ],
+  "postCreateCommand": "pip3 install -r backend/requirements.txt && npm ci --prefix frontend",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -15,8 +20,6 @@
       ]
     }
   },
-  
   "remoteUser": "root",
-  
   "forwardPorts": [8000, 5173]
 }
