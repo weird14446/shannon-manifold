@@ -62,6 +62,10 @@ class Settings:
         self.jwt_access_token_expire_minutes = int(
             os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60")
         )
+        self.google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+        self.admin_full_name = os.getenv("ADMIN_FULL_NAME", "Platform Administrator").strip() or "Platform Administrator"
+        self.admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+        self.admin_password = os.getenv("ADMIN_PASSWORD", "").strip()
 
         self.proof_upload_dir = Path(
             os.getenv("PROOF_UPLOAD_DIR", "/app/storage/uploads")

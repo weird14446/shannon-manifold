@@ -11,3 +11,5 @@ pypdf
 python-multipart
 httpx
 qdrant-client
+google-auth
+requests

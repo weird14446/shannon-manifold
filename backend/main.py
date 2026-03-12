@@ -6,9 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import models  # noqa: F401
 from config import get_settings
 from database import Base, SessionLocal, engine
-from routers import agents, auth, chat, lean_workspace, proofs, theorems
-from seed import seed_database
+from routers import auth, chat, lean_workspace, proofs, theorems
+from services.admin_bootstrap import bootstrap_admin_user, ensure_user_auth_columns
 from services.rag_index import (
+    cleanup_duplicate_verified_documents,
     cleanup_missing_workspace_documents,
     ensure_rag_collection,
     sync_existing_proof_documents,
@@ -24,17 +25,19 @@ async def lifespan(_: FastAPI):
     settings.proof_artifact_dir.mkdir(parents=True, exist_ok=True)
     settings.lean_workspace_dir.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    ensure_user_auth_columns(engine)
     try:
         ensure_rag_collection(settings)
     except Exception as exc:  # pragma: no cover - startup resilience
         print(f"Warning: failed to initialize Qdrant collection: {exc}")
     db = SessionLocal()
     try:
-        seed_database(db)
+        bootstrap_admin_user(db, settings)
         try:
             await sync_workspace_seed_documents(db, settings)
             cleanup_missing_workspace_documents(db, settings=settings)
             await sync_existing_proof_documents(db, settings)
+            cleanup_duplicate_verified_documents(db, settings=settings)
             db.commit()
         except Exception as exc:  # pragma: no cover - startup resilience
             db.rollback()
@@ -58,7 +61,6 @@ app.include_router(auth.router)
 app.include_router(proofs.router)
 app.include_router(theorems.router)
 app.include_router(chat.router)
-app.include_router(agents.router)
 app.include_router(lean_workspace.router)
 
 @app.get("/")

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Check,
+  Download,
   ExternalLink,
   FileCode2,
+  FileText,
   LoaderCircle,
   Pencil,
   Save,
@@ -13,6 +15,7 @@ import {
 import {
   deleteTheorem,
   getTheoremDetail,
+  getTheoremPdfUrl,
   type AuthUser,
   type IndexedProofDetail,
   updateTheorem,
@@ -24,7 +27,12 @@ interface VerifiedCodeViewerProps {
   documentId: number;
   onBack: () => void;
   onOpenAuth: () => void;
-  onOpenPlayground: (seed: { code: string; title: string }) => void;
+  onOpenPlayground: (seed: {
+    code: string;
+    title: string;
+    proofWorkspaceId?: number | null;
+    pdfFilename?: string | null;
+  }) => void;
 }
 
 export function VerifiedCodeViewer({
@@ -91,6 +99,8 @@ export function VerifiedCodeViewer({
     onOpenPlayground({
       code: detail.content,
       title: detail.title,
+      proofWorkspaceId: detail.proof_workspace_id,
+      pdfFilename: detail.pdf_filename,
     });
   };
 
@@ -150,6 +160,10 @@ export function VerifiedCodeViewer({
       setIsDeleting(false);
     }
   };
+
+  const pdfPreviewUrl = detail?.has_pdf ? getTheoremPdfUrl(detail.id) : null;
+  const pdfDownloadUrl = detail?.has_pdf ? getTheoremPdfUrl(detail.id, true) : null;
+  const hasPdfPreview = Boolean(detail?.has_pdf && pdfPreviewUrl && pdfDownloadUrl);
 
   if (isLoading) {
     return (
@@ -221,6 +235,10 @@ export function VerifiedCodeViewer({
                   Edit
                 </button>
               )}
+            </>
+          )}
+          {detail.can_delete && (
+            <>
               <button
                 type="button"
                 className="button-danger"
@@ -255,35 +273,79 @@ export function VerifiedCodeViewer({
 
       {!detail.can_edit && (
         <div className="proof-readonly-note">
-          This page is public, so anyone can inspect the code. Editing and deletion stay restricted
-          to the owner.
+          This page is public, so anyone can inspect the code. Editing stays restricted to the
+          owner, while deletion is available to the owner or an administrator.
         </div>
       )}
 
-      {isEditing ? (
-        <div className="verified-code-editor">
-          <label className="verified-code-field">
-            <span>Title</span>
-            <input
-              className="input-field"
-              value={draftTitle}
-              onChange={(event) => setDraftTitle(event.target.value)}
-              placeholder="Lean module title"
-            />
-          </label>
-          <label className="verified-code-field verified-code-field-grow">
-            <span>Lean Source</span>
-            <textarea
-              className="proof-textarea verified-code-textarea"
-              value={draftContent}
-              onChange={(event) => setDraftContent(event.target.value)}
-              spellCheck={false}
-            />
-          </label>
+      <div className={`verified-code-layout ${hasPdfPreview ? 'has-pdf' : ''}`}>
+        <div className="verified-code-panel">
+          <div className="verified-code-kicker">
+            <FileCode2 size={16} />
+            Lean Source
+          </div>
+          {isEditing ? (
+            <div className="verified-code-editor">
+              <label className="verified-code-field">
+                <span>Title</span>
+                <input
+                  className="input-field"
+                  value={draftTitle}
+                  onChange={(event) => setDraftTitle(event.target.value)}
+                  placeholder="Lean module title"
+                />
+              </label>
+              <label className="verified-code-field verified-code-field-grow">
+                <span>Lean Source</span>
+                <textarea
+                  className="proof-textarea verified-code-textarea"
+                  value={draftContent}
+                  onChange={(event) => setDraftContent(event.target.value)}
+                  spellCheck={false}
+                />
+              </label>
+            </div>
+          ) : (
+            <LeanCodeHighlighter code={detail.content} />
+          )}
         </div>
-      ) : (
-        <LeanCodeHighlighter code={detail.content} />
-      )}
+
+        {hasPdfPreview && pdfPreviewUrl && pdfDownloadUrl && (
+          <div className="verified-pdf-panel">
+            <div className="verified-pdf-header">
+              <div>
+                <div className="verified-code-kicker">
+                  <FileText size={16} />
+                  Source PDF
+                </div>
+                <p className="verified-pdf-copy">
+                  {detail.pdf_filename ?? 'Original uploaded PDF'}
+                </p>
+              </div>
+              <div className="verified-code-actions">
+                <a
+                  className="button-secondary"
+                  href={pdfPreviewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={16} />
+                  Open PDF
+                </a>
+                <a className="button-secondary" href={pdfDownloadUrl}>
+                  <Download size={16} />
+                  Download PDF
+                </a>
+              </div>
+            </div>
+            <iframe
+              className="verified-pdf-frame"
+              src={pdfPreviewUrl}
+              title={`${detail.title} PDF preview`}
+            />
+          </div>
+        )}
+      </div>
     </section>
   );
 }

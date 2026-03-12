@@ -374,6 +374,40 @@ def delete_indexed_document(
     _delete_qdrant_points(settings, vector_ids)
 
 
+def _dedupe_playground_documents_for_workspace(
+    db: Session,
+    *,
+    settings: Settings,
+    workspace: ProofWorkspace,
+    saved_path: str,
+    saved_module: str,
+    keep_document_id: int | None,
+) -> None:
+    duplicate_query = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.owner_id == workspace.owner_id,
+            CodeDocument.source_kind == "playground",
+            or_(
+                CodeDocument.path == saved_path,
+                CodeDocument.module_name == saved_module,
+                CodeDocument.title == workspace.title,
+            ),
+        )
+    )
+    if keep_document_id is not None:
+        duplicate_query = duplicate_query.filter(CodeDocument.id != keep_document_id)
+
+    duplicates = duplicate_query.all()
+    for duplicate in duplicates:
+        delete_indexed_document(
+            db,
+            settings=settings,
+            document=duplicate,
+            remove_workspace_file=False,
+        )
+
+
 def cleanup_missing_workspace_documents(
     db: Session,
     *,
@@ -407,6 +441,47 @@ def cleanup_missing_workspace_documents(
     return removed_count
 
 
+def cleanup_duplicate_verified_documents(
+    db: Session,
+    *,
+    settings: Settings,
+) -> int:
+    proof_documents = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind == "proof_workspace",
+        )
+        .all()
+    )
+
+    removed_count = 0
+    for document in proof_documents:
+        duplicate_query = (
+            db.query(CodeDocument)
+            .filter(
+                CodeDocument.owner_id == document.owner_id,
+                CodeDocument.source_kind == "playground",
+                or_(
+                    CodeDocument.path == document.path,
+                    CodeDocument.module_name == document.module_name,
+                    CodeDocument.title == document.title,
+                ),
+            )
+        )
+        duplicates = duplicate_query.all()
+        for duplicate in duplicates:
+            delete_indexed_document(
+                db,
+                settings=settings,
+                document=duplicate,
+                remove_workspace_file=False,
+            )
+            removed_count += 1
+
+    return removed_count
+
+
 async def sync_proof_workspace_to_rag(
     db: Session,
     *,
@@ -418,7 +493,7 @@ async def sync_proof_workspace_to_rag(
 ) -> CodeDocument:
     summary_source = workspace.extracted_text or workspace.source_text or ""
     summary_text = summary_source[:3000]
-    return await upsert_indexed_document(
+    indexed_document = await upsert_indexed_document(
         db,
         settings=settings,
         document=document,
@@ -433,6 +508,15 @@ async def sync_proof_workspace_to_rag(
         summary_text=summary_text,
         is_verified=True,
     )
+    _dedupe_playground_documents_for_workspace(
+        db,
+        settings=settings,
+        workspace=workspace,
+        saved_path=saved_path,
+        saved_module=saved_module,
+        keep_document_id=indexed_document.id,
+    )
+    return indexed_document
 
 
 async def sync_playground_document_to_rag(
@@ -663,6 +747,7 @@ def build_import_graph(
         nodes.append(
             {
                 "id": module_name,
+                "document_id": document.id,
                 "label": module_name.split(".")[-1],
                 "module_name": module_name,
                 "path": document.path,

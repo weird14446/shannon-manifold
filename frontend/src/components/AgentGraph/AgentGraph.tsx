@@ -4,6 +4,7 @@ import { getLeanImportGraph, type LeanImportGraph } from '../../api';
 
 interface GraphNode {
   id: string;
+  document_id: number;
   label: string;
   module_name: string;
   path: string | null;
@@ -20,9 +21,10 @@ interface GraphLink {
 
 interface AgentGraphProps {
   refreshKey?: number;
+  onOpenProof?: (documentId: number) => void;
 }
 
-export function AgentGraph({ refreshKey = 0 }: AgentGraphProps) {
+export function AgentGraph({ refreshKey = 0, onOpenProof }: AgentGraphProps) {
   const [graphData, setGraphData] = useState<LeanImportGraph>({ nodes: [], links: [] });
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -94,6 +96,12 @@ export function AgentGraph({ refreshKey = 0 }: AgentGraphProps) {
           onNodeDragEnd={(node) => {
             node.fx = node.x;
             node.fy = node.y;
+          }}
+          onNodeClick={(node) => {
+            const typedNode = node as GraphNode;
+            if (typedNode.document_id) {
+              onOpenProof?.(typedNode.document_id);
+            }
           }}
           nodeCanvasObject={(node, ctx, globalScale) => {
             const typedNode = node as GraphNode & { x?: number; y?: number };

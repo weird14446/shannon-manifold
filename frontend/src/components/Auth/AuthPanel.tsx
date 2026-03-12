@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { LockKeyhole, UserRound, X } from 'lucide-react';
 
-import { loginUser, registerUser, type AuthResponse } from '../../api';
+import { loginUser, loginWithGoogle, registerUser, type AuthResponse } from '../../api';
 
 type AuthMode = 'login' | 'register';
 
@@ -18,14 +18,69 @@ const INITIAL_FORM = {
   password: '',
 };
 
+const GOOGLE_SCRIPT_ID = 'google-identity-services';
+
+interface GoogleCredentialResponse {
+  credential: string;
+}
+
+interface GoogleIdentityApi {
+  initialize: (config: {
+    client_id: string;
+    callback: (response: GoogleCredentialResponse) => void;
+  }) => void;
+  renderButton: (
+    parent: HTMLElement,
+    options: Record<string, string | number | boolean>,
+  ) => void;
+  cancel: () => void;
+}
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: GoogleIdentityApi;
+      };
+    };
+  }
+}
+
+const loadGoogleIdentityScript = async (): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) {
+      resolve();
+      return;
+    }
+
+    const existingScript = document.getElementById(GOOGLE_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = GOOGLE_SCRIPT_ID;
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Google Identity Services.'));
+    document.head.appendChild(script);
+  });
+
 export function AuthPanel({
   isOpen,
   onClose,
   onAuthenticated,
 }: AuthPanelProps) {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<AuthMode>('login');
   const [form, setForm] = useState(INITIAL_FORM);
   const [error, setError] = useState('');
+  const [googleError, setGoogleError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -36,8 +91,78 @@ export function AuthPanel({
     setMode('login');
     setForm(INITIAL_FORM);
     setError('');
+    setGoogleError('');
     setIsSubmitting(false);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !googleClientId || !googleButtonRef.current) {
+      return;
+    }
+
+    let isActive = true;
+
+    const renderGoogleButton = async () => {
+      try {
+        await loadGoogleIdentityScript();
+        if (!isActive || !window.google?.accounts?.id || !googleButtonRef.current) {
+          return;
+        }
+
+        const handleGoogleCredential = async (response: GoogleCredentialResponse) => {
+          if (!response.credential) {
+            setGoogleError('Google did not return a usable credential.');
+            return;
+          }
+
+          setError('');
+          setGoogleError('');
+          setIsSubmitting(true);
+
+          try {
+            const payload = await loginWithGoogle({ credential: response.credential });
+            if (isActive) {
+              onAuthenticated(payload);
+            }
+          } catch (googleLoginError: any) {
+            if (isActive) {
+              setGoogleError(
+                googleLoginError?.response?.data?.detail ?? 'Google login failed.',
+              );
+            }
+          } finally {
+            if (isActive) {
+              setIsSubmitting(false);
+            }
+          }
+        };
+
+        googleButtonRef.current.innerHTML = '';
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleCredential,
+        });
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: 'outline',
+          size: 'large',
+          shape: 'pill',
+          text: 'continue_with',
+          width: Math.max(320, Math.floor(googleButtonRef.current.clientWidth || 360)),
+        });
+      } catch (scriptError) {
+        if (isActive) {
+          setGoogleError('Failed to initialize Google login.');
+        }
+      }
+    };
+
+    void renderGoogleButton();
+
+    return () => {
+      isActive = false;
+      window.google?.accounts?.id.cancel();
+    };
+  }, [googleClientId, isOpen, onAuthenticated]);
 
   if (!isOpen) {
     return null;
@@ -105,6 +230,15 @@ export function AuthPanel({
           </button>
         </div>
 
+        {googleClientId && (
+          <div className="auth-google-section">
+            <div ref={googleButtonRef} className="auth-google-button" />
+            <div className="auth-divider">
+              <span>or continue with email</span>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="auth-input-grid">
           {mode === 'register' && (
             <label>
@@ -153,6 +287,7 @@ export function AuthPanel({
             />
           </label>
 
+          {googleError && <div className="auth-error">{googleError}</div>}
           {error && <div className="auth-error">{error}</div>}
 
           <button type="submit" className="button-primary" disabled={isSubmitting}>

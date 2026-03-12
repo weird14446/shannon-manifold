@@ -4,6 +4,7 @@ export interface AuthUser {
   id: number;
   full_name: string;
   email: string;
+  is_admin: boolean;
   created_at: string;
 }
 
@@ -22,6 +23,10 @@ export interface RegisterPayload extends LoginPayload {
   full_name: string;
 }
 
+export interface GoogleLoginPayload {
+  credential: string;
+}
+
 export interface ProofAgentStep {
   agent_id: string;
   agent_name: string;
@@ -36,12 +41,14 @@ export interface ProofWorkspaceSummary {
   title: string;
   source_kind: string;
   source_filename: string | null;
+  has_pdf?: boolean;
   status: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface ProofWorkspace extends ProofWorkspaceSummary {
+  pdf_filename?: string | null;
   source_text: string;
   extracted_text: string;
   lean4_code: string;
@@ -60,6 +67,15 @@ export interface ChatCodeContextPayload {
   language?: string;
   module_name?: string | null;
   path?: string | null;
+  imports?: string[];
+  cursor_line?: number | null;
+  cursor_column?: number | null;
+  cursor_line_text?: string | null;
+  nearby_code?: string | null;
+  proof_state?: string | null;
+  active_goal?: string | null;
+  proof_workspace_id?: number | null;
+  attached_pdf_filename?: string | null;
 }
 
 export interface ChatReply {
@@ -77,11 +93,15 @@ export interface IndexedProofSummary {
   proof_language: string;
   is_verified: boolean;
   can_edit: boolean;
+  can_delete: boolean;
   source_kind: string;
   status: string;
   updated_at: string;
   path: string | null;
   module_name: string | null;
+  proof_workspace_id: number | null;
+  has_pdf: boolean;
+  pdf_filename: string | null;
 }
 
 export interface IndexedProofDetail extends IndexedProofSummary {
@@ -108,12 +128,15 @@ export interface LeanWorkspaceSyncResponse extends LeanWorkspaceInfo {
   saved_path: string;
   saved_module: string;
   pushed: boolean;
+  proof_workspace_id: number | null;
+  pdf_filename: string | null;
   remote_content_url: string | null;
   remote_commit_url: string | null;
 }
 
 export interface LeanImportGraphNode {
   id: string;
+  document_id: number;
   label: string;
   module_name: string;
   path: string | null;
@@ -174,12 +197,26 @@ export const chatWithOracle = async (
   message: string,
   history: ChatMessagePayload[],
   codeContext?: ChatCodeContextPayload | null,
+  attachmentFile?: File | null,
 ) => {
-  const response = await api.post<ChatReply>('/chat/', {
+  const payload = attachmentFile ? new FormData() : {
     message,
     history,
     code_context: codeContext ?? null,
-  });
+  };
+
+  if (payload instanceof FormData) {
+    payload.append('message', message);
+    payload.append('history', JSON.stringify(history));
+    if (codeContext) {
+      payload.append('code_context', JSON.stringify(codeContext));
+    }
+    if (attachmentFile) {
+      payload.append('attachment_file', attachmentFile);
+    }
+  }
+
+  const response = await api.post<ChatReply>('/chat/', payload);
   return response.data;
 };
 
@@ -190,6 +227,11 @@ export const registerUser = async (payload: RegisterPayload) => {
 
 export const loginUser = async (payload: LoginPayload) => {
   const response = await api.post<AuthResponse>('/auth/login', payload);
+  return response.data;
+};
+
+export const loginWithGoogle = async (payload: GoogleLoginPayload) => {
+  const response = await api.post<AuthResponse>('/auth/google', payload);
   return response.data;
 };
 
@@ -216,10 +258,23 @@ export const createManualProofWorkspace = async (payload: {
   return response.data;
 };
 
-export const uploadProofPdf = async (title: string, file: File) => {
+export const uploadProofPdf = async (
+  title: string,
+  file: File,
+  options?: {
+    workspace_id?: number | null;
+    lean4_code?: string | null;
+  },
+) => {
   const formData = new FormData();
   formData.append('title', title);
   formData.append('file', file);
+  if (options?.workspace_id != null) {
+    formData.append('workspace_id', String(options.workspace_id));
+  }
+  if (options?.lean4_code) {
+    formData.append('lean4_code', options.lean4_code);
+  }
   const response = await api.post<ProofWorkspace>('/proofs/upload-pdf', formData);
   return response.data;
 };
@@ -253,6 +308,12 @@ export const getTheoremDetail = async (theoremId: number) => {
   return response.data;
 };
 
+export const getTheoremPdfUrl = (theoremId: number, download = false) =>
+  `${API_BASE_URL}/theorems/${theoremId}/pdf${download ? '?download=true' : ''}`;
+
+export const getProofWorkspacePdfUrl = (workspaceId: number, download = false) =>
+  `${API_BASE_URL}/proofs/${workspaceId}/pdf${download ? '?download=true' : ''}`;
+
 export const updateTheorem = async (
   theoremId: number,
   payload: {
@@ -281,6 +342,7 @@ export const getLeanWorkspaceInfo = async () => {
 export const syncLeanPlaygroundToWorkspace = async (payload: {
   code: string;
   title: string;
+  proof_workspace_id?: number | null;
 }) => {
   const response = await api.post<LeanWorkspaceSyncResponse>(
     '/lean-workspace/sync-playground',
@@ -292,6 +354,7 @@ export const syncLeanPlaygroundToWorkspace = async (payload: {
 export const pushLeanPlaygroundToGithub = async (payload: {
   code: string;
   title: string;
+  proof_workspace_id?: number | null;
   commit_message?: string;
 }) => {
   const response = await api.post<LeanWorkspaceSyncResponse>(

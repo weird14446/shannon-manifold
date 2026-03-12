@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from database import get_db
+from models.proof_workspace import ProofWorkspace
 from models.user import User
 from security import get_current_user, get_current_user_optional
 from services.lean_workspace import (
@@ -18,7 +19,13 @@ from services.lean_workspace import (
     push_workspace_file_to_github,
     write_workspace_file,
 )
-from services.rag_index import build_import_graph, cleanup_missing_workspace_documents, sync_playground_document_to_rag
+from services.rag_index import (
+    build_import_graph,
+    cleanup_duplicate_verified_documents,
+    cleanup_missing_workspace_documents,
+    sync_playground_document_to_rag,
+    sync_proof_workspace_to_rag,
+)
 
 router = APIRouter(prefix="/lean-workspace", tags=["lean-workspace"])
 settings = get_settings()
@@ -43,6 +50,7 @@ class LeanWorkspaceInfoResponse(BaseModel):
 class SyncPlaygroundRequest(BaseModel):
     code: str = Field(min_length=1)
     title: str = Field(min_length=1, max_length=255)
+    proof_workspace_id: int | None = None
 
 
 class PushPlaygroundRequest(SyncPlaygroundRequest):
@@ -53,12 +61,15 @@ class SyncPlaygroundResponse(LeanWorkspaceInfoResponse):
     saved_path: str
     saved_module: str
     pushed: bool
+    proof_workspace_id: int | None = None
+    pdf_filename: str | None = None
     remote_content_url: str | None = None
     remote_commit_url: str | None = None
 
 
 class LeanImportGraphNode(BaseModel):
     id: str
+    document_id: int
     label: str
     module_name: str
     path: str | None
@@ -88,7 +99,9 @@ def read_lean_import_graph(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> LeanImportGraphResponse:
-    if cleanup_missing_workspace_documents(db, settings=settings):
+    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
+    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
+    if cleaned:
         db.commit()
 
     owner_id = current_user.id if current_user else None
@@ -102,6 +115,8 @@ def sync_playground_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SyncPlaygroundResponse:
+    linked_workspace_id: int | None = None
+    linked_pdf_filename: str | None = None
     try:
         saved_file = write_workspace_file(
             settings,
@@ -124,23 +139,48 @@ def sync_playground_file(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    asyncio.run(
-        sync_playground_document_to_rag(
+    workspace = None
+    if payload.proof_workspace_id is not None:
+        workspace = _get_backing_workspace(
             db,
-            settings=settings,
-            owner_id=current_user.id,
-            title=payload.title,
-            saved_path=saved_file["path"],
-            saved_module=saved_file["module"],
-            content=payload.code,
+            current_user=current_user,
+            workspace_id=payload.proof_workspace_id,
         )
-    )
+    if workspace is not None:
+        workspace.title = payload.title
+        workspace.lean4_code = payload.code
+        workspace.status = "edited"
+        linked_workspace_id = workspace.id
+        linked_pdf_filename = workspace.source_filename if workspace.pdf_path else None
+        asyncio.run(
+            sync_proof_workspace_to_rag(
+                db,
+                settings=settings,
+                workspace=workspace,
+                saved_path=saved_file["path"],
+                saved_module=saved_file["module"],
+            )
+        )
+    else:
+        asyncio.run(
+            sync_playground_document_to_rag(
+                db,
+                settings=settings,
+                owner_id=current_user.id,
+                title=payload.title,
+                saved_path=saved_file["path"],
+                saved_module=saved_file["module"],
+                content=payload.code,
+            )
+        )
     db.commit()
     return SyncPlaygroundResponse(
         **get_workspace_info(settings, payload.title),
         saved_path=saved_file["path"],
         saved_module=saved_file["module"],
         pushed=False,
+        proof_workspace_id=linked_workspace_id,
+        pdf_filename=linked_pdf_filename,
     )
 
 
@@ -150,6 +190,8 @@ async def push_playground_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SyncPlaygroundResponse:
+    linked_workspace_id: int | None = None
+    linked_pdf_filename: str | None = None
     try:
         saved_file = write_workspace_file(
             settings,
@@ -172,15 +214,36 @@ async def push_playground_file(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    await sync_playground_document_to_rag(
-        db,
-        settings=settings,
-        owner_id=current_user.id,
-        title=payload.title,
-        saved_path=saved_file["path"],
-        saved_module=saved_file["module"],
-        content=payload.code,
-    )
+    workspace = None
+    if payload.proof_workspace_id is not None:
+        workspace = _get_backing_workspace(
+            db,
+            current_user=current_user,
+            workspace_id=payload.proof_workspace_id,
+        )
+    if workspace is not None:
+        workspace.title = payload.title
+        workspace.lean4_code = payload.code
+        workspace.status = "edited"
+        linked_workspace_id = workspace.id
+        linked_pdf_filename = workspace.source_filename if workspace.pdf_path else None
+        await sync_proof_workspace_to_rag(
+            db,
+            settings=settings,
+            workspace=workspace,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+        )
+    else:
+        await sync_playground_document_to_rag(
+            db,
+            settings=settings,
+            owner_id=current_user.id,
+            title=payload.title,
+            saved_path=saved_file["path"],
+            saved_module=saved_file["module"],
+            content=payload.code,
+        )
     db.commit()
 
     commit_message = payload.commit_message or (
@@ -214,6 +277,25 @@ async def push_playground_file(
         saved_path=saved_file["path"],
         saved_module=saved_file["module"],
         pushed=pushed,
+        proof_workspace_id=linked_workspace_id,
+        pdf_filename=linked_pdf_filename,
         remote_content_url=pushed_file["content_url"],
         remote_commit_url=pushed_file["commit_url"],
     )
+
+
+def _get_backing_workspace(
+    db: Session,
+    *,
+    current_user: User,
+    workspace_id: int,
+) -> ProofWorkspace | None:
+    workspace = (
+        db.query(ProofWorkspace)
+        .filter(
+            ProofWorkspace.id == workspace_id,
+            ProofWorkspace.owner_id == current_user.id,
+        )
+        .first()
+    )
+    return workspace

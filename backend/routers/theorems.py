@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from models.user import User
 from security import get_current_user, get_current_user_optional
 from services.lean_workspace import LeanWorkspaceError, build_workspace_module, delete_workspace_file, write_workspace_file
 from services.rag_index import (
+    cleanup_duplicate_verified_documents,
     cleanup_missing_workspace_documents,
     delete_indexed_document,
     sync_playground_document_to_rag,
@@ -29,11 +31,15 @@ class TheoremSummaryResponse(BaseModel):
     proof_language: str
     is_verified: bool
     can_edit: bool
+    can_delete: bool
     source_kind: str
     status: str
     updated_at: str
     path: str | None
     module_name: str | None
+    proof_workspace_id: int | None
+    has_pdf: bool
+    pdf_filename: str | None
 
 
 class TheoremDetailResponse(TheoremSummaryResponse):
@@ -82,6 +88,14 @@ def _build_summary(
     statement = " ".join(preview_source.split())[:220] or "No indexed code preview available yet."
     source_kind = workspace.source_kind if workspace is not None else document.source_kind
     status = workspace.status if workspace is not None else "indexed"
+    can_edit = bool(current_user and document.owner_id == current_user.id)
+    can_delete = bool(
+        current_user
+        and (
+            document.owner_id == current_user.id
+            or bool(current_user.is_admin)
+        )
+    )
 
     return TheoremSummaryResponse(
         id=document.id,
@@ -89,12 +103,16 @@ def _build_summary(
         statement=statement,
         proof_language=document.language or "Lean4",
         is_verified=bool(document.is_verified),
-        can_edit=bool(current_user and document.owner_id == current_user.id),
+        can_edit=can_edit,
+        can_delete=can_delete,
         source_kind=source_kind,
         status=status,
         updated_at=document.updated_at.isoformat(),
         path=document.path,
         module_name=document.module_name,
+        proof_workspace_id=workspace.id if workspace is not None else None,
+        has_pdf=bool(workspace and workspace.pdf_path),
+        pdf_filename=workspace.source_filename if workspace and workspace.pdf_path else None,
     )
 
 
@@ -103,16 +121,20 @@ def _get_document_or_404(
     *,
     current_user: User,
     document_id: int,
+    allow_admin_delete: bool = False,
 ) -> CodeDocument:
-    document = (
+    query = (
         db.query(CodeDocument)
         .filter(
             CodeDocument.id == document_id,
-            CodeDocument.owner_id == current_user.id,
             CodeDocument.source_kind.in_(("proof_workspace", "playground")),
         )
-        .first()
     )
+    if current_user.is_admin and allow_admin_delete:
+        query = query.filter(CodeDocument.owner_id.isnot(None))
+    else:
+        query = query.filter(CodeDocument.owner_id == current_user.id)
+    document = query.first()
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Indexed proof not found.")
     return document
@@ -123,18 +145,17 @@ def _get_backing_workspace(
     *,
     current_user: User,
     document: CodeDocument,
+    allow_admin_delete: bool = False,
 ) -> ProofWorkspace:
     if document.source_kind != "proof_workspace" or document.source_ref_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This code entry is not backed by a proof workspace.")
 
-    workspace = (
-        db.query(ProofWorkspace)
-        .filter(
-            ProofWorkspace.id == document.source_ref_id,
-            ProofWorkspace.owner_id == current_user.id,
-        )
-        .first()
-    )
+    query = db.query(ProofWorkspace).filter(ProofWorkspace.id == document.source_ref_id)
+    if current_user.is_admin and allow_admin_delete:
+        query = query.filter(ProofWorkspace.owner_id.isnot(None))
+    else:
+        query = query.filter(ProofWorkspace.owner_id == current_user.id)
+    workspace = query.first()
     if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proof workspace not found.")
     return workspace
@@ -164,7 +185,9 @@ async def get_theorems(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[TheoremSummaryResponse]:
-    if cleanup_missing_workspace_documents(db, settings=settings):
+    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
+    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
+    if cleaned:
         db.commit()
 
     documents = (
@@ -187,7 +210,9 @@ async def get_theorem_detail(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> TheoremDetailResponse:
-    if cleanup_missing_workspace_documents(db, settings=settings):
+    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
+    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
+    if cleaned:
         db.commit()
 
     document = (
@@ -206,6 +231,48 @@ async def get_theorem_detail(
     workspace_lookup = _build_workspace_lookup(db, [document])
     summary = _build_summary(document, workspace_lookup, current_user)
     return TheoremDetailResponse(**summary.model_dump(), content=document.content)
+
+
+@router.get("/{document_id}/pdf")
+async def get_theorem_pdf(
+    document_id: int,
+    download: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    document = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.id == document_id,
+            CodeDocument.is_verified.is_(True),
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind == "proof_workspace",
+            CodeDocument.source_ref_id.isnot(None),
+        )
+        .first()
+    )
+    if document is None or document.source_ref_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not found for this code entry.")
+
+    workspace = (
+        db.query(ProofWorkspace)
+        .filter(ProofWorkspace.id == document.source_ref_id)
+        .first()
+    )
+    if workspace is None or not workspace.pdf_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not found for this code entry.")
+
+    pdf_path = Path(workspace.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file is missing.")
+
+    filename = workspace.source_filename or pdf_path.name
+    content_disposition = "attachment" if download else "inline"
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'{content_disposition}; filename="{filename}"'},
+    )
 
 
 @router.put("/{document_id}", response_model=TheoremDetailResponse)
@@ -272,10 +339,20 @@ async def delete_theorem_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    document = _get_document_or_404(db, current_user=current_user, document_id=document_id)
+    document = _get_document_or_404(
+        db,
+        current_user=current_user,
+        document_id=document_id,
+        allow_admin_delete=True,
+    )
 
     if document.source_kind == "proof_workspace":
-        workspace = _get_backing_workspace(db, current_user=current_user, document=document)
+        workspace = _get_backing_workspace(
+            db,
+            current_user=current_user,
+            document=document,
+            allow_admin_delete=True,
+        )
         _safe_delete_uploaded_file(workspace.pdf_path)
         db.delete(workspace)
 

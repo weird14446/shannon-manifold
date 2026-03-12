@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowLeft, Bot, FileUp, LogOut, Microscope, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Bot, LogOut, Microscope, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import './index.css';
 
 import {
@@ -7,7 +7,6 @@ import {
   getCurrentUser,
   hasStoredToken,
   setAuthToken,
-  uploadProofPdf,
   type AuthResponse,
   type AuthUser,
 } from './api';
@@ -19,11 +18,20 @@ import { TheoremExplorer } from './components/TheoremList/TheoremExplorer';
 import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
 
 type AppView = 'dashboard' | 'playground' | 'code';
+const CHAT_POPOVER_MIN_WIDTH = 360;
+const CHAT_POPOVER_MIN_HEIGHT = 420;
+
+interface ChatPopoverSize {
+  width: number;
+  height: number;
+}
 
 interface PlaygroundSeed {
   code: string;
   revision: number;
   title: string;
+  proofWorkspaceId?: number | null;
+  pdfFilename?: string | null;
 }
 
 const getInitialView = (): AppView => {
@@ -74,15 +82,20 @@ function App() {
   );
   const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(null);
   const [playgroundLoaderVersion, setPlaygroundLoaderVersion] = useState(0);
-  const [shouldOpenUploadAfterAuth, setShouldOpenUploadAfterAuth] = useState(false);
-  const [isUploadingProof, setIsUploadingProof] = useState(false);
-  const [uploadError, setUploadError] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const [playgroundChatContext, setPlaygroundChatContext] = useState<ChatCodeContextPayload | null>(
     null,
   );
-  const proofUploadInputRef = useRef<HTMLInputElement>(null);
+  const [playgroundChatAttachment, setPlaygroundChatAttachment] = useState<File | null>(null);
+  const [chatPopoverSize, setChatPopoverSize] = useState<ChatPopoverSize | null>(null);
+  const chatPopoverRef = useRef<HTMLDivElement>(null);
+  const chatResizeStateRef = useRef<{
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
 
   const LazyLeanPlayground = useMemo(
     () =>
@@ -129,15 +142,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!currentUser || !shouldOpenUploadAfterAuth) {
-      return;
-    }
-
-    proofUploadInputRef.current?.click();
-    setShouldOpenUploadAfterAuth(false);
-  }, [currentUser, shouldOpenUploadAfterAuth]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -172,15 +176,21 @@ function App() {
   const handleLogout = () => {
     setAuthToken(null);
     setCurrentUser(null);
-    setShouldOpenUploadAfterAuth(false);
   };
 
-  const openLeanPlayground = (seed?: { code: string; title: string }) => {
+  const openLeanPlayground = (seed?: {
+    code: string;
+    title: string;
+    proofWorkspaceId?: number | null;
+    pdfFilename?: string | null;
+  }) => {
     if (seed?.code) {
       setPlaygroundSeed({
         code: seed.code,
         revision: Date.now(),
         title: seed.title,
+        proofWorkspaceId: seed.proofWorkspaceId ?? null,
+        pdfFilename: seed.pdfFilename ?? null,
       });
     }
 
@@ -190,52 +200,6 @@ function App() {
   const openVerifiedCode = (documentId: number) => {
     setSelectedDocumentId(documentId);
     setCurrentView('code');
-  };
-
-  const handleProofUploadRequest = () => {
-    setUploadError('');
-
-    if (!currentUser) {
-      setShouldOpenUploadAfterAuth(true);
-      setIsAuthOpen(true);
-      return;
-    }
-
-    proofUploadInputRef.current?.click();
-  };
-
-  const handleProofUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    setUploadError('');
-    setIsUploadingProof(true);
-
-    try {
-      const title = file.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
-      const workspace = await uploadProofPdf(title, file);
-      setPlaygroundSeed({
-        code: workspace.lean4_code,
-        revision: Date.now(),
-        title: `${workspace.title} · Lean4`,
-      });
-      setGraphRefreshKey((current) => current + 1);
-      setCurrentView('playground');
-    } catch (error: any) {
-      if (error?.response?.status === 401) {
-        handleLogout();
-        setShouldOpenUploadAfterAuth(true);
-        setIsAuthOpen(true);
-        setUploadError('Your session expired. Please sign in again.');
-      } else {
-        setUploadError(error?.response?.data?.detail ?? 'Failed to upload and convert the PDF.');
-      }
-    } finally {
-      event.target.value = '';
-      setIsUploadingProof(false);
-    }
   };
 
   const handleRetryPlayground = () => {
@@ -248,6 +212,57 @@ function App() {
       code: payload.code,
       title: payload.title,
     });
+  };
+
+  const handlePlaygroundPushSuccess = () => {
+    setCurrentView('dashboard');
+  };
+
+  const handleChatResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    const popover = chatPopoverRef.current;
+    if (!popover) {
+      return;
+    }
+
+    const rect = popover.getBoundingClientRect();
+    chatResizeStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: rect.width,
+      startHeight: rect.height,
+    };
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const state = chatResizeStateRef.current;
+      if (!state) {
+        return;
+      }
+
+      const maxWidth = Math.max(CHAT_POPOVER_MIN_WIDTH, window.innerWidth - 32);
+      const maxHeight = Math.max(CHAT_POPOVER_MIN_HEIGHT, window.innerHeight - 128);
+      const nextWidth = Math.min(
+        maxWidth,
+        Math.max(CHAT_POPOVER_MIN_WIDTH, state.startWidth - (moveEvent.clientX - state.startX)),
+      );
+      const nextHeight = Math.min(
+        maxHeight,
+        Math.max(CHAT_POPOVER_MIN_HEIGHT, state.startHeight - (moveEvent.clientY - state.startY)),
+      );
+
+      setChatPopoverSize({
+        width: nextWidth,
+        height: nextHeight,
+      });
+    };
+
+    const handlePointerUp = () => {
+      chatResizeStateRef.current = null;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
   };
 
   const renderPlaygroundFallback = (errorMessage?: string | null) => (
@@ -271,14 +286,6 @@ function App() {
 
   return (
     <div className="layout">
-      <input
-        ref={proofUploadInputRef}
-        type="file"
-        accept="application/pdf"
-        hidden
-        onChange={handleProofUpload}
-      />
-
       <header className="header" style={{ height: '72px' }}>
         <button
           type="button"
@@ -309,14 +316,6 @@ function App() {
               Main Page
             </button>
           )}
-          <button
-            className="button-primary"
-            onClick={handleProofUploadRequest}
-            disabled={isUploadingProof}
-          >
-            <FileUp size={16} />
-            {isUploadingProof ? 'Uploading PDF...' : 'Upload Proof'}
-          </button>
           {currentUser ? (
             <>
               <div className="user-chip">
@@ -324,6 +323,7 @@ function App() {
                 <div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
                     {currentUser.full_name}
+                    {currentUser.is_admin ? ' · Admin' : ''}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     {currentUser.email}
@@ -410,10 +410,11 @@ function App() {
                     </button>
                   </div>
                 </div>
-                <AgentGraph refreshKey={graphRefreshKey} />
+                <AgentGraph
+                  refreshKey={graphRefreshKey}
+                  onOpenProof={openVerifiedCode}
+                />
               </div>
-
-              {uploadError && <div className="auth-error">{uploadError}</div>}
             </section>
           </section>
         ) : currentView === 'code' ? (
@@ -432,7 +433,6 @@ function App() {
           )
         ) : (
           <section className="playground-screen">
-            {uploadError && <div className="auth-error">{uploadError}</div>}
             <RecoverableErrorBoundary
               fallback={renderPlaygroundFallback}
               resetKey={`playground-${playgroundLoaderVersion}-${playgroundSeed?.revision ?? 0}`}
@@ -444,6 +444,8 @@ function App() {
                   onOpenAuth={() => setIsAuthOpen(true)}
                   onLogout={handleLogout}
                   onDocumentChange={setPlaygroundChatContext}
+                  onAttachmentChange={setPlaygroundChatAttachment}
+                  onPushSuccess={handlePlaygroundPushSuccess}
                 />
               </Suspense>
             </RecoverableErrorBoundary>
@@ -451,7 +453,23 @@ function App() {
         )}
       </main>
 
-      <div className={`chat-popover glass-panel ${isChatOpen ? 'is-open' : ''}`}>
+      <div
+        ref={chatPopoverRef}
+        className={`chat-popover glass-panel ${isChatOpen ? 'is-open' : ''}`}
+        style={
+          chatPopoverSize
+            ? {
+                width: `${chatPopoverSize.width}px`,
+                height: `${chatPopoverSize.height}px`,
+              }
+            : undefined
+        }
+      >
+        <div
+          className="chat-popover-resize-handle"
+          onPointerDown={handleChatResizeStart}
+          aria-hidden="true"
+        />
         <div className="chat-popover-header">
           <div>
             <div className="chat-popover-title">Theorem Oracle</div>
@@ -476,6 +494,9 @@ function App() {
             onOpenAuth={() => setIsAuthOpen(true)}
             onLogout={handleLogout}
             codeContext={currentView === 'playground' ? playgroundChatContext : null}
+            defaultAttachmentFile={
+              currentView === 'playground' ? playgroundChatAttachment : null
+            }
             onApplySuggestedCode={handleApplyChatSuggestedCode}
           />
         </div>
@@ -492,10 +513,7 @@ function App() {
 
       <AuthPanel
         isOpen={isAuthOpen}
-        onClose={() => {
-          setIsAuthOpen(false);
-          setShouldOpenUploadAfterAuth(false);
-        }}
+        onClose={() => setIsAuthOpen(false)}
         onAuthenticated={handleAuthenticated}
       />
     </div>

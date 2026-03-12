@@ -3,7 +3,8 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,12 @@ from database import get_db
 from models.proof_workspace import ProofWorkspace
 from models.user import User
 from security import get_current_user
-from services.lean_workspace import LeanWorkspaceError, build_workspace_module_sync, write_workspace_file
+from services.lean_workspace import (
+    LeanWorkspaceError,
+    build_workspace_module,
+    build_workspace_module_sync,
+    write_workspace_file,
+)
 from services.proof_pipeline import build_formalization_bundle, extract_text_from_pdf
 from services.rag_index import sync_proof_workspace_to_rag
 
@@ -34,12 +40,14 @@ class ProofWorkspaceSummaryResponse(BaseModel):
     title: str
     source_kind: str
     source_filename: str | None
+    has_pdf: bool
     status: str
     created_at: str
     updated_at: str
 
 
 class ProofWorkspaceResponse(ProofWorkspaceSummaryResponse):
+    pdf_filename: str | None
     source_text: str
     extracted_text: str
     lean4_code: str
@@ -82,6 +90,37 @@ def get_proof_workspace(
 ) -> ProofWorkspaceResponse:
     workspace = _get_workspace_or_404(db, current_user, workspace_id)
     return _to_detail_response(workspace)
+
+
+@router.get("/{workspace_id}/pdf")
+def get_proof_workspace_pdf(
+    workspace_id: int,
+    download: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    workspace = _get_workspace_or_404(db, current_user, workspace_id)
+    if not workspace.pdf_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF not found for this workspace.",
+        )
+
+    pdf_path = Path(workspace.pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The PDF file is missing.",
+        )
+
+    filename = workspace.source_filename or pdf_path.name
+    content_disposition = "attachment" if download else "inline"
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'{content_disposition}; filename="{filename}"'},
+    )
 
 
 @router.post(
@@ -141,7 +180,10 @@ def create_manual_workspace(
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_pdf_workspace(
+    response: Response,
     title: str = Form(default=""),
+    workspace_id: int | None = Form(default=None),
+    lean4_code: str = Form(default=""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -175,6 +217,7 @@ async def upload_pdf_workspace(
         )
 
     normalized_title = title.strip() or Path(filename).stem or "Uploaded proof"
+    preserved_lean_code = lean4_code.strip()
     bundle = build_formalization_bundle(
         title=normalized_title,
         source_text=extracted_text,
@@ -182,36 +225,55 @@ async def upload_pdf_workspace(
         source_filename=filename,
     )
 
-    workspace = ProofWorkspace(
-        owner_id=current_user.id,
-        title=normalized_title,
-        source_kind="pdf",
-        source_filename=filename,
-        pdf_path=str(upload_path),
-        source_text=bundle["source_text"],
-        extracted_text=bundle["extracted_text"],
-        lean4_code=bundle["lean4_code"],
-        rocq_code=bundle["rocq_code"],
-        status=bundle["status"],
-        agent_trace_json=bundle["agent_trace_json"],
-    )
-    db.add(workspace)
+    previous_pdf_path: str | None = None
+    if workspace_id is not None:
+        workspace = _get_workspace_or_404(db, current_user, workspace_id)
+        previous_pdf_path = workspace.pdf_path
+        workspace.title = normalized_title
+        workspace.source_kind = "pdf"
+        workspace.source_filename = filename
+        workspace.pdf_path = str(upload_path)
+        workspace.source_text = bundle["source_text"]
+        workspace.extracted_text = bundle["extracted_text"]
+        workspace.lean4_code = preserved_lean_code or bundle["lean4_code"]
+        workspace.rocq_code = bundle["rocq_code"]
+        workspace.status = "edited" if preserved_lean_code else bundle["status"]
+        workspace.agent_trace_json = bundle["agent_trace_json"]
+        response.status_code = status.HTTP_200_OK
+    else:
+        workspace = ProofWorkspace(
+            owner_id=current_user.id,
+            title=normalized_title,
+            source_kind="pdf",
+            source_filename=filename,
+            pdf_path=str(upload_path),
+            source_text=bundle["source_text"],
+            extracted_text=bundle["extracted_text"],
+            lean4_code=preserved_lean_code or bundle["lean4_code"],
+            rocq_code=bundle["rocq_code"],
+            status="edited" if preserved_lean_code else bundle["status"],
+            agent_trace_json=bundle["agent_trace_json"],
+        )
+        db.add(workspace)
+
     db.commit()
     db.refresh(workspace)
+
+    if previous_pdf_path and previous_pdf_path != str(upload_path):
+        _safe_delete_uploaded_pdf(previous_pdf_path)
+
     saved_file = write_workspace_file(
         settings,
         code=workspace.lean4_code,
         title=workspace.title,
     )
-    _build_saved_workspace_or_422(saved_file)
-    asyncio.run(
-        sync_proof_workspace_to_rag(
-            db,
-            settings=settings,
-            workspace=workspace,
-            saved_path=saved_file["path"],
-            saved_module=saved_file["module"],
-        )
+    await _build_saved_workspace_async_or_422(saved_file)
+    await sync_proof_workspace_to_rag(
+        db,
+        settings=settings,
+        workspace=workspace,
+        saved_path=saved_file["path"],
+        saved_module=saved_file["module"],
     )
     db.commit()
     db.refresh(workspace)
@@ -313,9 +375,42 @@ def _get_workspace_or_404(db: Session, current_user: User, workspace_id: int) ->
     return workspace
 
 
+def _safe_delete_uploaded_pdf(file_path: str | None) -> None:
+    if not file_path:
+        return
+
+    try:
+        candidate = Path(file_path).resolve()
+        uploads_root = settings.proof_upload_dir.resolve()
+    except OSError:
+        return
+
+    if uploads_root not in candidate.parents:
+        return
+
+    try:
+        candidate.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
 def _build_saved_workspace_or_422(saved_file: dict[str, str]) -> None:
     try:
         build_workspace_module_sync(
+            settings,
+            relative_workspace_path=saved_file["path"],
+            module_name=saved_file["module"],
+        )
+    except LeanWorkspaceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+async def _build_saved_workspace_async_or_422(saved_file: dict[str, str]) -> None:
+    try:
+        await build_workspace_module(
             settings,
             relative_workspace_path=saved_file["path"],
             module_name=saved_file["module"],
@@ -333,6 +428,7 @@ def _to_summary_response(workspace: ProofWorkspace) -> ProofWorkspaceSummaryResp
         title=workspace.title,
         source_kind=workspace.source_kind,
         source_filename=workspace.source_filename,
+        has_pdf=bool(workspace.pdf_path),
         status=workspace.status,
         created_at=workspace.created_at.isoformat(),
         updated_at=workspace.updated_at.isoformat(),
@@ -342,6 +438,7 @@ def _to_summary_response(workspace: ProofWorkspace) -> ProofWorkspaceSummaryResp
 def _to_detail_response(workspace: ProofWorkspace) -> ProofWorkspaceResponse:
     return ProofWorkspaceResponse(
         **_to_summary_response(workspace).model_dump(),
+        pdf_filename=workspace.source_filename if workspace.pdf_path else None,
         source_text=workspace.source_text,
         extracted_text=workspace.extracted_text,
         lean4_code=workspace.lean4_code,

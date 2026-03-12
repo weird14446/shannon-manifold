@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -14,6 +15,15 @@ def normalize_text(text: str) -> str:
 
 def extract_text_from_pdf(file_path: Path) -> str:
     reader = PdfReader(str(file_path))
+    return _extract_text_from_pdf_reader(reader)
+
+
+def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
+    reader = PdfReader(BytesIO(file_bytes))
+    return _extract_text_from_pdf_reader(reader)
+
+
+def _extract_text_from_pdf_reader(reader: PdfReader) -> str:
     pages: list[str] = []
 
     for index, page in enumerate(reader.pages, start=1):
@@ -141,8 +151,7 @@ def _generate_lean4_code(title: str, theorem_identifier: str, excerpt: str) -> s
         "- Formalize hypotheses and imported dependencies.\n"
         "- Replace the trivial proof with the actual Lean4 proof.\n"
         "-/\n\n"
-        "import ShannonManifold\n\n"
-        "open ShannonManifold\n\n"
+        "import Mathlib\n\n"
         f"theorem {theorem_identifier}_draft : True := by\n"
         "  trivial\n"
     )

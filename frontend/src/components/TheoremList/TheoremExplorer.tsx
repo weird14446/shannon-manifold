@@ -68,7 +68,7 @@ export function TheoremExplorer({ currentUser, onOpenProof }: TheoremExplorerPro
       ) : proofs.length === 0 ? (
         <div className="theorem-empty-state">
           <Sparkles size={18} />
-          Upload a proof or save from the Lean Playground to populate this database.
+          Save code from the Lean Playground to populate this database.
         </div>
       ) : (
         <div className="theorem-card-list">

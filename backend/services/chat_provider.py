@@ -51,6 +51,7 @@ def _build_system_prompt(
     user_full_name: str,
     rag_context: list[dict[str, Any]] | None,
     code_context: dict[str, Any] | None,
+    attachment_context: dict[str, Any] | None,
 ) -> str:
     context_sections: list[str] = []
     for item in rag_context or []:
@@ -71,6 +72,9 @@ def _build_system_prompt(
         f"Current member: {user_full_name}.\n"
         "Use the retrieved proof and Lean context when it is relevant.\n"
         "If the retrieved context is insufficient, say so explicitly.\n"
+        "If an active Lean proof state is available, treat it as the primary source of truth.\n"
+        "Base tactic suggestions and lemma recommendations on the exact goal, local context, imports, and cursor location.\n"
+        "If the goal is already solved, say that clearly instead of suggesting more tactics.\n"
         "When helping write code, explain briefly and then provide a fenced code block.\n"
         "If revising an existing Lean file, prefer returning the full updated Lean file in a ```lean block.\n"
         "Respond in Markdown when useful."
@@ -85,8 +89,21 @@ def _build_system_prompt(
         code_module = str(code_context.get("module_name") or "").strip()
         code_path = str(code_context.get("path") or "").strip()
         code_body = str(code_context.get("content") or "").strip()
+        code_imports = code_context.get("imports") or []
+        cursor_line = code_context.get("cursor_line")
+        cursor_column = code_context.get("cursor_column")
+        cursor_line_text = str(code_context.get("cursor_line_text") or "").strip()
+        nearby_code = str(code_context.get("nearby_code") or "").strip()
+        proof_state = str(code_context.get("proof_state") or "").strip()
+        active_goal = str(code_context.get("active_goal") or "").strip()
         if len(code_body) > 8000:
             code_body = code_body[:8000].rstrip() + "\n\n-- Truncated for prompt length --"
+        if len(nearby_code) > 2500:
+            nearby_code = nearby_code[:2500].rstrip() + "\n\n-- Truncated nearby code --"
+        if len(proof_state) > 3000:
+            proof_state = proof_state[:3000].rstrip() + "\n\n-- Truncated proof state --"
+        if len(active_goal) > 1500:
+            active_goal = active_goal[:1500].rstrip() + "\n\n-- Truncated active goal --"
 
         prompt += (
             "\n\nActive editor context:\n"
@@ -94,9 +111,44 @@ def _build_system_prompt(
             f"Language: {code_language}\n"
             f"Module: {code_module or 'n/a'}\n"
             f"Path: {code_path or 'n/a'}\n"
+            f"Imports: {', '.join(code_imports) if code_imports else 'n/a'}\n"
+            f"Cursor: line {cursor_line or 'n/a'}, column {cursor_column or 'n/a'}\n"
+            f"Cursor line text: {cursor_line_text or 'n/a'}\n"
+            "Nearby code:\n"
+            f"{nearby_code or '(unavailable)'}\n"
+            "Active goal at cursor:\n"
+            f"{active_goal or '(no focused goal reported)'}\n"
+            "Infoview proof state:\n"
+            f"{proof_state or '(no proof state reported)'}\n"
             "Current content:\n"
             f"{code_body or '(empty file)'}"
         )
+
+    if attachment_context:
+        attachment_kind = str(attachment_context.get("kind") or "")
+        attachment_name = str(attachment_context.get("filename") or "attached-file")
+        if attachment_kind == "pdf":
+            attachment_pages = attachment_context.get("pages")
+            attachment_body = str(attachment_context.get("content") or "").strip()
+            if len(attachment_body) > 10000:
+                attachment_body = (
+                    attachment_body[:10000].rstrip() + "\n\n-- Truncated attached PDF text --"
+                )
+
+            prompt += (
+                "\n\nAttached PDF context:\n"
+                f"Filename: {attachment_name}\n"
+                f"Pages with extracted text: {attachment_pages or 'n/a'}\n"
+                "Extracted text:\n"
+                f"{attachment_body or '(no extractable text)'}"
+            )
+        elif attachment_kind == "image":
+            prompt += (
+                "\n\nAttached image context:\n"
+                f"Filename: {attachment_name}\n"
+                f"MIME type: {attachment_context.get('mime_type') or 'unknown'}\n"
+                "Inspect the attached image directly and use it as primary evidence when relevant."
+            )
 
     return prompt
 
@@ -172,6 +224,7 @@ def build_mock_chat_reply(
     settings: Settings,
     rag_context: list[dict[str, Any]] | None = None,
     code_context: dict[str, Any] | None = None,
+    attachment_context: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     del history
     user_msg = message.lower()
@@ -180,7 +233,22 @@ def build_mock_chat_reply(
         f"I am the theorem oracle (Model: {settings.chatbot_model}) "
         f"supporting {user_full_name}. "
     )
-    if rag_context:
+    if attachment_context:
+        attachment_kind = str(attachment_context.get("kind") or "")
+        attachment_name = str(attachment_context.get("filename") or "attached-file")
+        if attachment_kind == "pdf":
+            attachment_excerpt = str(attachment_context.get("content") or "").strip()[:500]
+            response_content += (
+                f"I extracted text from `{attachment_name}` and can use it while answering.\n\n"
+                f"PDF excerpt:\n{attachment_excerpt}\n\n"
+                "Ask for a summary, theorem extraction, or a Lean formalization draft based on it."
+            )
+        else:
+            response_content += (
+                f"I received the image `{attachment_name}`. The mock provider cannot inspect image "
+                "pixels, but Gemini mode can analyze the image directly."
+            )
+    elif rag_context:
         response_content += "I searched your indexed proofs and Lean files. Relevant context:\n\n"
         for item in rag_context[:3]:
             label = item.get("symbol_name") or item.get("module_name") or item.get("title")
@@ -193,6 +261,8 @@ def build_mock_chat_reply(
     elif code_context or any(token in user_msg for token in ("lean", "code", "theorem", "proof", "lemma")):
         language = str((code_context or {}).get("language") or "Lean4")
         base_code = str((code_context or {}).get("content") or "").strip()
+        active_goal = str((code_context or {}).get("active_goal") or "").strip()
+        cursor_line = (code_context or {}).get("cursor_line")
         if language.lower().startswith("lean"):
             suggested_code = (
                 base_code
@@ -202,7 +272,13 @@ def build_mock_chat_reply(
             if "example : 1 = 1 := by" not in suggested_code and "theorem" not in suggested_code:
                 suggested_code = suggested_code.rstrip() + "\n\nexample : 1 = 1 := by\n  rfl\n"
             response_content += (
-                "I can help co-write the Lean file. Start from this draft and apply it to the playground if it fits.\n\n"
+                (
+                    f"I can see your current proof state near line {cursor_line}. "
+                    f"Focused goal: {active_goal[:220]}. \n\n"
+                    if active_goal
+                    else "I can help co-write the Lean file from the current cursor position.\n\n"
+                )
+                + "Start from this draft and apply it to the playground if it fits.\n\n"
                 f"```lean\n{suggested_code.strip()}\n```"
             )
             return {
@@ -238,12 +314,19 @@ async def _generate_openai_compatible_reply(
     settings: Settings,
     rag_context: list[dict[str, Any]] | None,
     code_context: dict[str, Any] | None,
+    attachment_context: dict[str, Any] | None,
 ) -> dict[str, str]:
+    if attachment_context and str(attachment_context.get("kind") or "") == "image":
+        raise ChatProviderError(
+            "Image attachments are only supported when CHATBOT_PROVIDER=gemini."
+        )
+
     system_prompt = _build_system_prompt(
         settings=settings,
         user_full_name=user_full_name,
         rag_context=rag_context,
         code_context=code_context,
+        attachment_context=attachment_context,
     )
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
@@ -293,12 +376,14 @@ async def _generate_gemini_reply(
     settings: Settings,
     rag_context: list[dict[str, Any]] | None,
     code_context: dict[str, Any] | None,
+    attachment_context: dict[str, Any] | None,
 ) -> dict[str, str]:
     system_prompt = _build_system_prompt(
         settings=settings,
         user_full_name=user_full_name,
         rag_context=rag_context,
         code_context=code_context,
+        attachment_context=attachment_context,
     )
     contents = [
         {
@@ -307,7 +392,23 @@ async def _generate_gemini_reply(
         }
         for item in _normalize_history(history, settings.chatbot_max_history_messages)
     ]
-    contents.append({"role": "user", "parts": [{"text": message.strip()}]})
+    user_parts: list[dict[str, Any]] = [
+        {"text": message.strip() or "Please analyze the attached file."}
+    ]
+    if attachment_context and str(attachment_context.get("kind") or "") == "image":
+        inline_data = str(attachment_context.get("data_base64") or "").strip()
+        mime_type = str(attachment_context.get("mime_type") or "").strip()
+        if inline_data and mime_type:
+            user_parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": inline_data,
+                    }
+                }
+            )
+
+    contents.append({"role": "user", "parts": user_parts})
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": contents,
@@ -352,6 +453,7 @@ async def generate_chat_reply(
     settings: Settings,
     rag_context: list[dict[str, Any]] | None = None,
     code_context: dict[str, Any] | None = None,
+    attachment_context: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     provider = settings.chatbot_provider
 
@@ -364,6 +466,7 @@ async def generate_chat_reply(
             settings=settings,
             rag_context=rag_context,
             code_context=code_context,
+            attachment_context=attachment_context,
         )
 
     if not settings.chatbot_api_key:
@@ -377,6 +480,7 @@ async def generate_chat_reply(
             settings=settings,
             rag_context=rag_context,
             code_context=code_context,
+            attachment_context=attachment_context,
         )
 
     if provider == "gemini":
@@ -387,6 +491,7 @@ async def generate_chat_reply(
             settings=settings,
             rag_context=rag_context,
             code_context=code_context,
+            attachment_context=attachment_context,
         )
 
     raise ChatProviderError(f"Unsupported CHATBOT_PROVIDER: {provider}")
