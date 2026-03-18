@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import models  # noqa: F401
 from config import get_settings
 from database import Base, SessionLocal, engine
-from routers import auth, chat, lean_workspace, proofs, theorems
+from routers import auth, chat, lean_workspace, proofs, projects, theorems
 from services.admin_bootstrap import bootstrap_admin_user, ensure_user_auth_columns
+from services.project_workspace import backfill_existing_project_scaffolds
 from services.rag_index import (
     cleanup_duplicate_verified_documents,
     cleanup_missing_workspace_documents,
@@ -24,8 +25,12 @@ async def lifespan(_: FastAPI):
     settings.proof_upload_dir.mkdir(parents=True, exist_ok=True)
     settings.proof_artifact_dir.mkdir(parents=True, exist_ok=True)
     settings.lean_workspace_dir.mkdir(parents=True, exist_ok=True)
+    (settings.lean_workspace_dir / "projects").mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     ensure_user_auth_columns(engine)
+    repaired_projects = backfill_existing_project_scaffolds(settings)
+    if repaired_projects:
+        print(f"Backfilled Lean project scaffolds: {repaired_projects}")
     try:
         ensure_rag_collection(settings)
     except Exception as exc:  # pragma: no cover - startup resilience
@@ -62,6 +67,7 @@ app.include_router(proofs.router)
 app.include_router(theorems.router)
 app.include_router(chat.router)
 app.include_router(lean_workspace.router)
+app.include_router(projects.router)
 
 @app.get("/")
 def read_root():

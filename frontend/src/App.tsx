@@ -9,11 +9,13 @@ import {
   setAuthToken,
   type AuthResponse,
   type AuthUser,
+  type ProjectOpenResponse,
 } from './api';
 import { AuthPanel } from './components/Auth/AuthPanel';
 import { Chatbot } from './components/Chatbot/Chatbot';
 import { RecoverableErrorBoundary } from './components/ErrorBoundary/RecoverableErrorBoundary';
 import { AgentGraph } from './components/AgentGraph/AgentGraph';
+import { ProjectPanel } from './components/ProjectPanel/ProjectPanel';
 import { TheoremExplorer } from './components/TheoremList/TheoremExplorer';
 import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
 
@@ -32,6 +34,14 @@ interface PlaygroundSeed {
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  projectSlug?: string | null;
+  projectTitle?: string | null;
+  projectRoot?: string | null;
+  packageName?: string | null;
+  projectFilePath?: string | null;
+  projectModuleName?: string | null;
+  projectEntryFilePath?: string | null;
+  projectEntryModuleName?: string | null;
 }
 
 const getInitialView = (): AppView => {
@@ -42,6 +52,10 @@ const getInitialView = (): AppView => {
   const view = new URLSearchParams(window.location.search).get('view');
   if (view === 'playground' || view === 'code') {
     return view;
+  }
+
+  if (new URLSearchParams(window.location.search).get('project')) {
+    return 'playground';
   }
 
   return 'dashboard';
@@ -59,6 +73,27 @@ const getInitialDocumentId = (): number | null => {
 
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getInitialPlaygroundSeed = (): PlaygroundSeed | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const projectSlug = params.get('project')?.trim();
+  if (!projectSlug) {
+    return null;
+  }
+
+  const projectFilePath = params.get('projectFile')?.trim() || null;
+  return {
+    code: '',
+    revision: Date.now(),
+    title: projectFilePath?.split('/').pop()?.replace(/\.lean$/i, '') || projectSlug,
+    projectSlug,
+    projectFilePath,
+  };
 };
 
 const encodeLeanShareCode = (code: string) => {
@@ -80,9 +115,12 @@ function App() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(() =>
     getInitialDocumentId(),
   );
-  const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(null);
+  const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(() =>
+    getInitialPlaygroundSeed(),
+  );
   const [playgroundLoaderVersion, setPlaygroundLoaderVersion] = useState(0);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const [playgroundChatContext, setPlaygroundChatContext] = useState<ChatCodeContextPayload | null>(
     null,
@@ -149,12 +187,25 @@ function App() {
     const url = new URL(window.location.href);
     url.searchParams.set('view', currentView);
 
-    if (currentView === 'playground' && playgroundSeed?.code) {
+    if (currentView === 'playground' && playgroundSeed?.projectSlug) {
+      url.searchParams.set('project', playgroundSeed.projectSlug);
+      if (playgroundSeed.projectFilePath) {
+        url.searchParams.set('projectFile', playgroundSeed.projectFilePath);
+      } else {
+        url.searchParams.delete('projectFile');
+      }
+      url.searchParams.delete('leanCode');
+      url.searchParams.delete('leanTitle');
+    } else if (currentView === 'playground' && playgroundSeed?.code) {
       url.searchParams.set('leanCode', encodeLeanShareCode(playgroundSeed.code));
       url.searchParams.set('leanTitle', playgroundSeed.title);
+      url.searchParams.delete('project');
+      url.searchParams.delete('projectFile');
     } else {
       url.searchParams.delete('leanCode');
       url.searchParams.delete('leanTitle');
+      url.searchParams.delete('project');
+      url.searchParams.delete('projectFile');
     }
 
     if (currentView === 'code' && selectedDocumentId) {
@@ -183,15 +234,33 @@ function App() {
     title: string;
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
+    projectSlug?: string | null;
+    projectTitle?: string | null;
+    projectRoot?: string | null;
+    packageName?: string | null;
+    projectFilePath?: string | null;
+    projectModuleName?: string | null;
+    projectEntryFilePath?: string | null;
+    projectEntryModuleName?: string | null;
   }) => {
-    if (seed?.code) {
+    if (seed?.code || seed?.projectSlug) {
       setPlaygroundSeed({
-        code: seed.code,
+        code: seed.code ?? '',
         revision: Date.now(),
         title: seed.title,
         proofWorkspaceId: seed.proofWorkspaceId ?? null,
         pdfFilename: seed.pdfFilename ?? null,
+        projectSlug: seed.projectSlug ?? null,
+        projectTitle: seed.projectTitle ?? null,
+        projectRoot: seed.projectRoot ?? null,
+        packageName: seed.packageName ?? null,
+        projectFilePath: seed.projectFilePath ?? null,
+        projectModuleName: seed.projectModuleName ?? null,
+        projectEntryFilePath: seed.projectEntryFilePath ?? null,
+        projectEntryModuleName: seed.projectEntryModuleName ?? null,
       });
+    } else {
+      setPlaygroundSeed(null);
     }
 
     setCurrentView('playground');
@@ -215,7 +284,25 @@ function App() {
   };
 
   const handlePlaygroundPushSuccess = () => {
+    if (playgroundSeed?.projectSlug) {
+      return;
+    }
     setCurrentView('dashboard');
+  };
+
+  const handleOpenProject = (project: ProjectOpenResponse) => {
+    openLeanPlayground({
+      code: project.content,
+      title: project.workspace_title,
+      projectSlug: project.slug,
+      projectTitle: project.title,
+      projectRoot: project.project_root,
+      packageName: project.package_name,
+      projectFilePath: project.workspace_file_path,
+      projectModuleName: project.workspace_module_name,
+      projectEntryFilePath: project.entry_file_path,
+      projectEntryModuleName: project.entry_module_name,
+    });
   };
 
   const handleChatResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -304,6 +391,12 @@ function App() {
           <h1>Shannon Manifold</h1>
         </button>
         <div className="header-actions">
+          <button
+            className={`nav-pill ${currentView === 'playground' && playgroundSeed?.projectSlug ? 'is-active' : ''}`}
+            onClick={() => setIsProjectPanelOpen(true)}
+          >
+            Projects
+          </button>
           <button
             className={`nav-pill ${currentView === 'playground' ? 'is-active' : ''}`}
             onClick={() => openLeanPlayground()}
@@ -515,6 +608,16 @@ function App() {
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthenticated={handleAuthenticated}
+      />
+      <ProjectPanel
+        isOpen={isProjectPanelOpen}
+        currentUser={currentUser}
+        onClose={() => setIsProjectPanelOpen(false)}
+        onOpenAuth={() => {
+          setIsProjectPanelOpen(false);
+          setIsAuthOpen(true);
+        }}
+        onOpenProject={handleOpenProject}
       />
     </div>
   );

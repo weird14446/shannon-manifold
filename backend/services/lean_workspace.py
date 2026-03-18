@@ -184,6 +184,7 @@ async def build_workspace_module(
     *,
     relative_workspace_path: str,
     module_name: str,
+    project_root: str | None = None,
 ) -> dict[str, object]:
     if not settings.lean_server_api_url:
         return {}
@@ -193,6 +194,8 @@ async def build_workspace_module(
         "path": relative_workspace_path,
         "module": module_name,
     }
+    if project_root:
+        payload["project_root"] = project_root
 
     async with httpx.AsyncClient(timeout=90.0) as client:
         try:
@@ -212,12 +215,14 @@ def build_workspace_module_sync(
     *,
     relative_workspace_path: str,
     module_name: str,
+    project_root: str | None = None,
 ) -> dict[str, object]:
     return asyncio.run(
         build_workspace_module(
             settings,
             relative_workspace_path=relative_workspace_path,
             module_name=module_name,
+            project_root=project_root,
         )
     )
 

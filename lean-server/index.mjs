@@ -1,7 +1,7 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import * as childProcess from 'child_process';
 import { WebSocketServer } from 'ws';
 import * as rpc from 'vscode-ws-jsonrpc';
@@ -10,6 +10,7 @@ import * as jsonRpcServer from 'vscode-ws-jsonrpc/server';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const leanProjectPath = process.env.LEAN_PROJECT_PATH || '/workspace/lean-workspace';
 const port = Number(process.env.PORT || '8080');
+const projectsRoot = path.join(leanProjectPath, 'projects');
 
 const app = express();
 app.use(express.json({ limit: '64kb' }));
@@ -44,10 +45,10 @@ const runCommand = (command, args, options = {}) =>
       error.exitCode = code;
       reject(error);
     });
-	  });
+  });
 
-const collectDependencyLeanPaths = () => {
-  const packageRoot = path.join(leanProjectPath, '.lake', 'packages');
+const collectDependencyLeanPaths = (workspaceRoot) => {
+  const packageRoot = path.join(workspaceRoot, '.lake', 'packages');
   const paths = [];
   if (!fs.existsSync(packageRoot)) {
     return paths;
@@ -67,19 +68,60 @@ const collectDependencyLeanPaths = () => {
   return paths;
 };
 
-const detectLeanPath = async () => {
-  const buildLibPath = path.join(leanProjectPath, '.lake', 'build', 'lib', 'lean');
+const detectLeanPath = async (workspaceRoot) => {
+  const buildLibPath = path.join(workspaceRoot, '.lake', 'build', 'lib', 'lean');
   const { stdout } = await runCommand('lean', ['--print-libdir']);
   const leanLibDir = stdout.trim();
-  return [buildLibPath, ...collectDependencyLeanPaths(), leanLibDir].join(':');
+  return [buildLibPath, ...collectDependencyLeanPaths(workspaceRoot), leanLibDir].join(':');
 };
 
-let resolvedLeanPath = null;
+const resolvedLeanPaths = new Map();
+const workspaceReadyPromises = new Map();
 
-const initializeWorkspace = async () => {
-  console.log('Building shared Lean workspace on startup...');
+const normalizeProjectRoot = (projectRoot) => {
+  if (typeof projectRoot !== 'string' || projectRoot.trim() === '') {
+    return null;
+  }
+
+  const normalized = path.posix.normalize(projectRoot.trim().replace(/^\/+/, ''));
+  const parts = normalized.split('/').filter((part) => part && part !== '.');
+  if (parts.some((part) => part === '..')) {
+    throw new Error('Project root must stay inside projects/.');
+  }
+  if (parts.length === 0 || parts[0].toLowerCase() !== 'projects') {
+    throw new Error('Project root must live under projects/.');
+  }
+  parts[0] = 'projects';
+  return parts.join('/');
+};
+
+const resolveWorkspaceRoot = (projectRoot = null) => {
+  const normalizedProjectRoot = normalizeProjectRoot(projectRoot);
+  if (!normalizedProjectRoot) {
+    return {
+      relativeRoot: null,
+      absoluteRoot: leanProjectPath,
+    };
+  }
+
+  const absoluteRoot = path.resolve(leanProjectPath, normalizedProjectRoot);
+  const normalizedProjectsRoot = path.resolve(projectsRoot);
+  if (!absoluteRoot.startsWith(`${normalizedProjectsRoot}${path.sep}`)) {
+    throw new Error('Project root must stay inside projects/.');
+  }
+
+  return {
+    relativeRoot: normalizedProjectRoot,
+    absoluteRoot,
+  };
+};
+
+const initializeWorkspace = async (workspaceRoot, label = 'shared Lean workspace') => {
+  console.log(`Building ${label}...`);
   try {
-    const { stdout, stderr } = await runCommand('lake', ['exe', 'cache', 'get']);
+    const { stdout, stderr } = await runCommand('lake', ['exe', 'cache', 'get'], {
+      cwd: workspaceRoot,
+    });
     const cacheOutput = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     if (cacheOutput) {
       console.log(cacheOutput);
@@ -87,17 +129,36 @@ const initializeWorkspace = async () => {
   } catch (error) {
     console.warn(`Lean cache fetch skipped: ${error}`);
   }
-  const { stdout, stderr } = await runCommand('lake', ['build']);
+  const { stdout, stderr } = await runCommand('lake', ['build'], {
+    cwd: workspaceRoot,
+  });
   const output = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
   if (output) {
     console.log(output);
   }
-  resolvedLeanPath = await detectLeanPath();
-  console.log('Initial Lean workspace build completed.');
-  return resolvedLeanPath;
+  const leanPath = await detectLeanPath(workspaceRoot);
+  resolvedLeanPaths.set(workspaceRoot, leanPath);
+  console.log(`Build completed for ${label}.`);
+  return leanPath;
 };
 
-const startupReadyPromise = initializeWorkspace();
+const ensureWorkspaceReady = (projectRoot = null) => {
+  const { relativeRoot, absoluteRoot } = resolveWorkspaceRoot(projectRoot);
+  const existing = workspaceReadyPromises.get(absoluteRoot);
+  if (existing) {
+    return existing;
+  }
+
+  const label = relativeRoot ?? 'shared Lean workspace';
+  const promise = initializeWorkspace(absoluteRoot, label);
+  workspaceReadyPromises.set(absoluteRoot, promise);
+  promise.catch(() => {
+    workspaceReadyPromises.delete(absoluteRoot);
+  });
+  return promise;
+};
+
+const startupReadyPromise = ensureWorkspaceReady();
 
 const normalizeWorkspacePath = (workspacePath) => {
   if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
@@ -115,25 +176,29 @@ const normalizeWorkspacePath = (workspacePath) => {
   return normalized;
 };
 
-const buildWorkspaceFile = async (workspacePath) => {
+const buildWorkspaceFile = async (workspacePath, projectRoot = null) => {
+  const { relativeRoot, absoluteRoot } = resolveWorkspaceRoot(projectRoot);
   const normalizedPath = normalizeWorkspacePath(workspacePath);
-  const absoluteSourcePath = path.join(leanProjectPath, normalizedPath);
+  const absoluteSourcePath = path.join(absoluteRoot, normalizedPath);
   if (!fs.existsSync(absoluteSourcePath)) {
     throw new Error(`Lean source file does not exist: ${normalizedPath}`);
   }
 
-  const buildDir = path.join(leanProjectPath, '.lake', 'build', 'lib', 'lean', path.dirname(normalizedPath));
+  const buildDir = path.join(absoluteRoot, '.lake', 'build', 'lib', 'lean', path.dirname(normalizedPath));
   fs.mkdirSync(buildDir, { recursive: true });
 
   const relativeWithoutExt = normalizedPath.replace(/\.lean$/, '');
-  const oleanPath = path.join(leanProjectPath, '.lake', 'build', 'lib', 'lean', `${relativeWithoutExt}.olean`);
-  const ileanPath = path.join(leanProjectPath, '.lake', 'build', 'lib', 'lean', `${relativeWithoutExt}.ilean`);
-  const leanPath = resolvedLeanPath ?? (await startupReadyPromise);
+  const oleanPath = path.join(absoluteRoot, '.lake', 'build', 'lib', 'lean', `${relativeWithoutExt}.olean`);
+  const ileanPath = path.join(absoluteRoot, '.lake', 'build', 'lib', 'lean', `${relativeWithoutExt}.ilean`);
+  const leanPath =
+    resolvedLeanPaths.get(absoluteRoot) ??
+    (await ensureWorkspaceReady(relativeRoot));
 
   const { stdout, stderr } = await runCommand(
     'lean',
-    ['-R', leanProjectPath, '-o', oleanPath, '-i', ileanPath, normalizedPath],
+    ['-R', absoluteRoot, '-o', oleanPath, '-i', ileanPath, normalizedPath],
     {
+      cwd: absoluteRoot,
       env: {
         ...process.env,
         LEAN_PATH: leanPath,
@@ -143,8 +208,9 @@ const buildWorkspaceFile = async (workspacePath) => {
 
   return {
     path: normalizedPath,
-    oleanPath: path.relative(leanProjectPath, oleanPath),
-    ileanPath: path.relative(leanProjectPath, ileanPath),
+    projectRoot: relativeRoot,
+    oleanPath: path.relative(absoluteRoot, oleanPath),
+    ileanPath: path.relative(absoluteRoot, ileanPath),
     output: [stdout.trim(), stderr.trim()].filter(Boolean).join('\n'),
   };
 };
@@ -167,15 +233,18 @@ app.get('/health', async (_request, response) => {
     project: 'shannon-manifold-lean-server',
     status: ready ? 'ok' : 'initializing',
     leanProjectPath,
-    leanPathReady: Boolean(resolvedLeanPath),
+    leanPathReady: Boolean(resolvedLeanPaths.get(leanProjectPath)),
     workspaceReady: ready,
   });
 });
 
 app.post('/build-module', async (request, response) => {
   try {
-    await startupReadyPromise;
-    const result = await buildWorkspaceFile(request.body?.path);
+    await ensureWorkspaceReady(request.body?.project_root ?? null);
+    const result = await buildWorkspaceFile(
+      request.body?.path,
+      request.body?.project_root ?? null,
+    );
     response.json({
       status: 'ok',
       module: request.body?.module ?? null,
@@ -197,9 +266,9 @@ const server = app.listen(port, () => {
 
 const wss = new WebSocketServer({ server });
 
-const startServerProcess = () => {
+const startServerProcess = (workspaceRoot) => {
   const serverProcess = childProcess.spawn('lake', ['serve', '--'], {
-    cwd: leanProjectPath,
+    cwd: workspaceRoot,
   });
 
   serverProcess.on('error', (error) => {
@@ -253,16 +322,31 @@ const filenamesToUris = (prefix, value) => {
   return value;
 };
 
-wss.addListener('connection', async (ws) => {
+wss.addListener('connection', async (ws, request) => {
+  let relativeRoot = null;
+  let absoluteRoot = leanProjectPath;
+
   try {
-    await startupReadyPromise;
+    const requestUrl = new URL(request.url ?? '/', 'http://localhost');
+    const projectRoot =
+      requestUrl.searchParams.get('projectRoot') ??
+      requestUrl.searchParams.get('ProjectRoot');
+    const resolved = resolveWorkspaceRoot(projectRoot);
+    relativeRoot = resolved.relativeRoot;
+    absoluteRoot = resolved.absoluteRoot;
+    await ensureWorkspaceReady(relativeRoot);
   } catch (error) {
-    ws.close(1011, 'Lean workspace failed to initialize');
+    ws.close(
+      1011,
+      error instanceof Error ? error.message : 'Lean workspace failed to initialize',
+    );
     return;
   }
 
-  const serverProcess = startServerProcess();
-  console.log(`[${new Date().toISOString()}] Lean socket opened`);
+  const serverProcess = startServerProcess(absoluteRoot);
+  console.log(
+    `[${new Date().toISOString()}] Lean socket opened${relativeRoot ? ` for ${relativeRoot}` : ''}`,
+  );
 
   const cleanup = () => {
     if (!serverProcess.killed) {
@@ -291,12 +375,12 @@ wss.addListener('connection', async (ws) => {
   const serverConnection = jsonRpcServer.createProcessStreamConnection(serverProcess);
 
   socketConnection.forward(serverConnection, (message) => {
-    urisToFilenames(leanProjectPath, message);
+    urisToFilenames(absoluteRoot, message);
     return message;
   });
 
   serverConnection.forward(socketConnection, (message) => {
-    filenamesToUris(leanProjectPath, message);
+    filenamesToUris(absoluteRoot, message);
     return message;
   });
 

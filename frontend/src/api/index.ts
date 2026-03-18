@@ -134,6 +134,23 @@ export interface LeanWorkspaceSyncResponse extends LeanWorkspaceInfo {
   remote_commit_url: string | null;
 }
 
+export interface ProjectSummary {
+  title: string;
+  slug: string;
+  owner_slug: string;
+  project_root: string;
+  package_name: string;
+  entry_file_path: string;
+  entry_module_name: string;
+}
+
+export interface ProjectOpenResponse extends ProjectSummary {
+  workspace_title: string;
+  workspace_file_path: string;
+  workspace_module_name: string;
+  content: string;
+}
+
 export interface LeanImportGraphNode {
   id: string;
   document_id: number;
@@ -336,6 +353,56 @@ export const getLeanImportGraph = async () => {
 
 export const getLeanWorkspaceInfo = async () => {
   const response = await api.get<LeanWorkspaceInfo>('/lean-workspace/');
+  return response.data;
+};
+
+export const listProjects = async () => {
+  const response = await api.get<ProjectSummary[]>('/projects/');
+  return response.data;
+};
+
+export const createProject = async (payload: {
+  title: string;
+  slug?: string;
+}) => {
+  const response = await api.post<ProjectOpenResponse>('/projects/', payload);
+  return response.data;
+};
+
+export const openProject = async (
+  projectSlug: string,
+  filePath?: string | null,
+) => {
+  const response = await api.get<ProjectOpenResponse>(`/projects/${encodeURIComponent(projectSlug)}/open`, {
+    params: filePath ? { file_path: filePath } : undefined,
+  });
+  return response.data;
+};
+
+export const createProjectFile = async (
+  projectSlug: string,
+  payload: {
+    path: string;
+  },
+) => {
+  const response = await api.post<ProjectOpenResponse>(
+    `/projects/${encodeURIComponent(projectSlug)}/files`,
+    payload,
+  );
+  return response.data;
+};
+
+export const saveProjectFile = async (
+  projectSlug: string,
+  payload: {
+    path: string;
+    content: string;
+  },
+) => {
+  const response = await api.put<ProjectOpenResponse>(
+    `/projects/${encodeURIComponent(projectSlug)}/files`,
+    payload,
+  );
   return response.data;
 };
 

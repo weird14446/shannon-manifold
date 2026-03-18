@@ -17,7 +17,9 @@ import {
 import { LeanMonaco, LeanMonacoEditor, type LeanMonacoOptions } from 'lean4monaco';
 import {
   getLeanWorkspaceInfo,
+  openProject,
   pushLeanPlaygroundToGithub,
+  saveProjectFile,
   uploadProofPdf,
   type ChatCodeContextPayload,
   type AuthUser,
@@ -43,6 +45,14 @@ export interface LeanPlaygroundSeed {
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  projectSlug?: string | null;
+  projectTitle?: string | null;
+  projectRoot?: string | null;
+  packageName?: string | null;
+  projectFilePath?: string | null;
+  projectModuleName?: string | null;
+  projectEntryFilePath?: string | null;
+  projectEntryModuleName?: string | null;
 }
 
 interface LeanPlaygroundProps {
@@ -60,6 +70,14 @@ interface PlaygroundDocument {
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  projectSlug?: string | null;
+  projectTitle?: string | null;
+  projectRoot?: string | null;
+  packageName?: string | null;
+  projectFilePath?: string | null;
+  projectModuleName?: string | null;
+  projectEntryFilePath?: string | null;
+  projectEntryModuleName?: string | null;
 }
 
 interface CursorSnapshot {
@@ -76,6 +94,21 @@ const getDefaultWebSocketUrl = () => {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.hostname}:8080/`;
+};
+
+const buildWebSocketUrl = (projectRoot?: string | null) => {
+  const baseUrl = import.meta.env.VITE_LEAN_WS_URL || getDefaultWebSocketUrl();
+  if (!projectRoot) {
+    return baseUrl;
+  }
+
+  if (typeof window === 'undefined') {
+    return `${baseUrl}?projectRoot=${encodeURIComponent(projectRoot)}`;
+  }
+
+  const url = new URL(baseUrl, window.location.href);
+  url.searchParams.set('projectRoot', projectRoot);
+  return url.toString();
 };
 
 const encodeSharedCode = (code: string) => {
@@ -196,6 +229,23 @@ const extractActiveGoal = (proofState: string) => {
 };
 
 const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocument => {
+  if (seed?.projectSlug) {
+    return {
+      code: seed.code,
+      title: seed.title,
+      proofWorkspaceId: seed.proofWorkspaceId ?? null,
+      pdfFilename: seed.pdfFilename ?? null,
+      projectSlug: seed.projectSlug ?? null,
+      projectTitle: seed.projectTitle ?? null,
+      projectRoot: seed.projectRoot ?? null,
+      packageName: seed.packageName ?? null,
+      projectFilePath: seed.projectFilePath ?? null,
+      projectModuleName: seed.projectModuleName ?? null,
+      projectEntryFilePath: seed.projectEntryFilePath ?? null,
+      projectEntryModuleName: seed.projectEntryModuleName ?? null,
+    };
+  }
+
   if (seed?.code) {
     return {
       code: seed.code,
@@ -346,13 +396,35 @@ export function LeanPlayground({
   const [workspaceAction, setWorkspaceAction] = useState<'idle' | 'pushing'>('idle');
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [workspaceNoticeTone, setWorkspaceNoticeTone] = useState<'success' | 'error'>('success');
-  const [savedWorkspacePath, setSavedWorkspacePath] = useState(PLAYGROUND_FILE_PATH);
-  const [savedWorkspaceModule, setSavedWorkspaceModule] = useState('ShannonManifold.Playground');
+  const [savedWorkspacePath, setSavedWorkspacePath] = useState(
+    initialDocument.projectFilePath ?? PLAYGROUND_FILE_PATH,
+  );
+  const [savedWorkspaceModule, setSavedWorkspaceModule] = useState(
+    initialDocument.projectModuleName ?? 'ShannonManifold.Playground',
+  );
   const [cursorSnapshot, setCursorSnapshot] = useState<CursorSnapshot>({ line: 1, column: 1 });
   const [infoviewSnapshot, setInfoviewSnapshot] = useState('');
   const [isAuxiliaryUiVisible, setIsAuxiliaryUiVisible] = useState(true);
   const [activeProofWorkspaceId, setActiveProofWorkspaceId] = useState<number | null>(
     initialDocument.proofWorkspaceId ?? null,
+  );
+  const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(
+    initialDocument.projectSlug ?? null,
+  );
+  const [activeProjectTitle, setActiveProjectTitle] = useState<string | null>(
+    initialDocument.projectTitle ?? null,
+  );
+  const [activeProjectRoot, setActiveProjectRoot] = useState<string | null>(
+    initialDocument.projectRoot ?? null,
+  );
+  const [activeProjectPackageName, setActiveProjectPackageName] = useState<string | null>(
+    initialDocument.packageName ?? null,
+  );
+  const [activeProjectEntryFilePath, setActiveProjectEntryFilePath] = useState<string | null>(
+    initialDocument.projectEntryFilePath ?? null,
+  );
+  const [activeProjectEntryModuleName, setActiveProjectEntryModuleName] = useState<string | null>(
+    initialDocument.projectEntryModuleName ?? null,
   );
   const [attachedPdfFilename, setAttachedPdfFilename] = useState<string | null>(null);
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
@@ -407,11 +479,32 @@ export function LeanPlayground({
         title: currentTitle,
         proofWorkspaceId: activeProofWorkspaceId,
         pdfFilename: null,
+        projectSlug: activeProjectSlug,
+        projectTitle: activeProjectTitle,
+        projectRoot: activeProjectRoot,
+        packageName: activeProjectPackageName,
+        projectFilePath: savedWorkspacePath,
+        projectModuleName: savedWorkspaceModule,
+        projectEntryFilePath: activeProjectEntryFilePath,
+        projectEntryModuleName: activeProjectEntryModuleName,
       }),
     );
 
     latestCodeRef.current = currentCode;
-  }, [activeProofWorkspaceId, attachedPdfFilename, currentCode, currentTitle]);
+  }, [
+    activeProofWorkspaceId,
+    activeProjectEntryFilePath,
+    activeProjectEntryModuleName,
+    activeProjectPackageName,
+    activeProjectRoot,
+    activeProjectSlug,
+    activeProjectTitle,
+    attachedPdfFilename,
+    currentCode,
+    currentTitle,
+    savedWorkspaceModule,
+    savedWorkspacePath,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -434,7 +527,9 @@ export function LeanPlayground({
       content: currentCode,
       language: 'Lean4',
       module_name: savedWorkspaceModule,
-      path: savedWorkspacePath,
+      path: activeProjectRoot
+        ? `${activeProjectRoot}/${savedWorkspacePath.replace(/^\/+/, '')}`
+        : savedWorkspacePath,
       imports: parsedImports,
       cursor_line: cursorSnapshot.line,
       cursor_column: cursorSnapshot.column,
@@ -483,7 +578,7 @@ export function LeanPlayground({
 
       const options: LeanMonacoOptions = {
         websocket: {
-          url: import.meta.env.VITE_LEAN_WS_URL || getDefaultWebSocketUrl(),
+          url: buildWebSocketUrl(activeProjectRoot),
         },
         htmlElement: editorRef.current ?? undefined,
         vscode: {
@@ -548,7 +643,7 @@ export function LeanPlayground({
 
           setCurrentCode(model.getValue());
         });
-        cursorDispose = leanEditor.editor.onDidChangeCursorPosition((event) => {
+        cursorDispose = leanEditor.editor.onDidChangeCursorPosition((event: { position: { lineNumber: number; column: number } }) => {
           setCursorSnapshot({
             line: event.position.lineNumber,
             column: event.position.column,
@@ -581,7 +676,7 @@ export function LeanPlayground({
       leanEditorRef.current = null;
       leanMonacoRef.current = null;
     };
-  }, [editorModelPath]);
+  }, [activeProjectRoot, editorModelPath]);
 
   useEffect(() => {
     if (!infoviewRef.current) {
@@ -662,8 +757,10 @@ export function LeanPlayground({
         const info = await getLeanWorkspaceInfo();
         if (isMounted) {
           setWorkspaceInfo(info);
-          setSavedWorkspacePath(info.playground_file);
-          setSavedWorkspaceModule(info.playground_module);
+          if (!activeProjectSlug) {
+            setSavedWorkspacePath(info.playground_file);
+            setSavedWorkspaceModule(info.playground_module);
+          }
         }
       } catch (error) {
         console.error('Failed to load Lean workspace info:', error);
@@ -678,10 +775,10 @@ export function LeanPlayground({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [activeProjectSlug]);
 
   useEffect(() => {
-    if (!seed?.code || seed.revision === 0) {
+    if ((!seed?.code && !seed?.projectSlug) || seed.revision === 0) {
       return;
     }
 
@@ -689,11 +786,98 @@ export function LeanPlayground({
     applyDocument({
       code: seed.code,
       title: seed.title,
-      source: 'workspace',
+      source: seed.projectSlug ? 'project' : 'workspace',
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
+      workspacePath: seed.projectFilePath ?? savedWorkspacePath,
+      workspaceModule: seed.projectModuleName ?? savedWorkspaceModule,
+      projectSlug: seed.projectSlug ?? null,
+      projectTitle: seed.projectTitle ?? null,
+      projectRoot: seed.projectRoot ?? null,
+      packageName: seed.packageName ?? null,
+      projectEntryFilePath: seed.projectEntryFilePath ?? null,
+      projectEntryModuleName: seed.projectEntryModuleName ?? null,
     });
-  }, [seed?.code, seed?.pdfFilename, seed?.proofWorkspaceId, seed?.revision, seed?.title]);
+  }, [
+    savedWorkspaceModule,
+    savedWorkspacePath,
+    seed?.code,
+    seed?.packageName,
+    seed?.pdfFilename,
+    seed?.projectEntryFilePath,
+    seed?.projectEntryModuleName,
+    seed?.projectFilePath,
+    seed?.projectModuleName,
+    seed?.projectRoot,
+    seed?.projectSlug,
+    seed?.projectTitle,
+    seed?.proofWorkspaceId,
+    seed?.revision,
+    seed?.title,
+  ]);
+
+  useEffect(() => {
+    if (!seed?.projectSlug || !currentUser) {
+      return;
+    }
+    if (seed.code) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadProjectDocument = async () => {
+      try {
+        const project = await openProject(seed.projectSlug!, seed.projectFilePath ?? undefined);
+        if (!isMounted) {
+          return;
+        }
+
+        replacePendingPdf(null);
+        applyDocument({
+          code: project.content,
+          title: project.workspace_title,
+          source: 'project',
+          workspacePath: project.workspace_file_path,
+          workspaceModule: project.workspace_module_name,
+          projectSlug: project.slug,
+          projectTitle: project.title,
+          projectRoot: project.project_root,
+          packageName: project.package_name,
+          projectEntryFilePath: project.entry_file_path,
+          projectEntryModuleName: project.entry_module_name,
+        });
+      } catch (error: any) {
+        if (!isMounted) {
+          return;
+        }
+        if (error?.response?.status === 401) {
+          onLogout();
+          onOpenAuth();
+          publishWorkspaceNotice('Sign in to open project workspaces.', 'error');
+          return;
+        }
+        publishWorkspaceNotice(
+          error?.response?.data?.detail ?? 'Failed to open the selected project file.',
+          'error',
+        );
+      }
+    };
+
+    void loadProjectDocument();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    currentUser,
+    onLogout,
+    onOpenAuth,
+    seed?.code,
+    seed?.projectFilePath,
+    seed?.projectSlug,
+    seed?.revision,
+  ]);
 
   const applyDocument = ({
     code,
@@ -701,20 +885,57 @@ export function LeanPlayground({
     source,
     proofWorkspaceId = null,
     pdfFilename: _pdfFilename = null,
+    workspacePath = savedWorkspacePath,
+    workspaceModule = savedWorkspaceModule,
+    projectSlug = null,
+    projectTitle = null,
+    projectRoot = null,
+    packageName = null,
+    projectEntryFilePath = null,
+    projectEntryModuleName = null,
   }: {
     code: string;
     title: string;
     source: string;
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
+    workspacePath?: string;
+    workspaceModule?: string;
+    projectSlug?: string | null;
+    projectTitle?: string | null;
+    projectRoot?: string | null;
+    packageName?: string | null;
+    projectEntryFilePath?: string | null;
+    projectEntryModuleName?: string | null;
   }) => {
     latestCodeRef.current = code;
     setCurrentCode(code);
     setCurrentTitle(title);
     setDocumentSource(source);
     setActiveProofWorkspaceId(proofWorkspaceId);
-    setAttachedPdfFilename(null);
-    setBaselineDocument({ code, title, proofWorkspaceId, pdfFilename: null });
+    setSavedWorkspacePath(workspacePath);
+    setSavedWorkspaceModule(workspaceModule);
+    setActiveProjectSlug(projectSlug);
+    setActiveProjectTitle(projectTitle);
+    setActiveProjectRoot(projectRoot);
+    setActiveProjectPackageName(packageName);
+    setActiveProjectEntryFilePath(projectEntryFilePath);
+    setActiveProjectEntryModuleName(projectEntryModuleName);
+    setAttachedPdfFilename(_pdfFilename);
+    setBaselineDocument({
+      code,
+      title,
+      proofWorkspaceId,
+      pdfFilename: _pdfFilename,
+      projectSlug,
+      projectTitle,
+      projectRoot,
+      packageName,
+      projectFilePath: workspacePath,
+      projectModuleName: workspaceModule,
+      projectEntryFilePath,
+      projectEntryModuleName,
+    });
     setShareState('idle');
 
     const model = leanEditorRef.current?.editor?.getModel();
@@ -737,6 +958,16 @@ export function LeanPlayground({
       code: baselineDocument.code,
       title: baselineDocument.title,
       source: documentSource,
+      proofWorkspaceId: baselineDocument.proofWorkspaceId ?? null,
+      pdfFilename: baselineDocument.pdfFilename ?? null,
+      workspacePath: baselineDocument.projectFilePath ?? savedWorkspacePath,
+      workspaceModule: baselineDocument.projectModuleName ?? savedWorkspaceModule,
+      projectSlug: baselineDocument.projectSlug ?? null,
+      projectTitle: baselineDocument.projectTitle ?? null,
+      projectRoot: baselineDocument.projectRoot ?? null,
+      packageName: baselineDocument.packageName ?? null,
+      projectEntryFilePath: baselineDocument.projectEntryFilePath ?? null,
+      projectEntryModuleName: baselineDocument.projectEntryModuleName ?? null,
     });
   };
 
@@ -747,6 +978,11 @@ export function LeanPlayground({
   const handlePushGithub = async () => {
     if (!currentUser) {
       onOpenAuth();
+      return;
+    }
+
+    if (activeProjectSlug && !savedWorkspacePath) {
+      publishWorkspaceNotice('Open a project file before saving.', 'error');
       return;
     }
 
@@ -763,6 +999,32 @@ export function LeanPlayground({
       | null = null;
 
     try {
+      if (activeProjectSlug) {
+        if (pendingPdfFile) {
+          throw new Error('PDF uploads are only supported in the shared workspace playground.');
+        }
+
+        const response = await saveProjectFile(activeProjectSlug, {
+          path: savedWorkspacePath,
+          content: currentCode,
+        });
+        setSavedWorkspacePath(response.workspace_file_path);
+        setSavedWorkspaceModule(response.workspace_module_name);
+        setBaselineDocument((current) => ({
+          ...current,
+          code: currentCode,
+          title: currentTitle,
+          projectFilePath: response.workspace_file_path,
+          projectModuleName: response.workspace_module_name,
+        }));
+        leanMonacoRef.current?.restart();
+        publishWorkspaceNotice(
+          `Saved ${response.workspace_module_name} in ${activeProjectRoot ?? 'the selected project'}.`,
+          'success',
+        );
+        return;
+      }
+
       let nextTitle = currentTitle;
       let nextCode = currentCode;
       let nextProofWorkspaceId = activeProofWorkspaceId;
@@ -833,8 +1095,8 @@ export function LeanPlayground({
       } else {
         publishWorkspaceNotice(
           persistedWorkspace
-            ? `Saved the PDF-backed document, but the final workspace sync failed: ${error?.response?.data?.detail ?? 'Failed to push the Lean playground file.'}`
-            : error?.response?.data?.detail ?? 'Failed to push the Lean playground file.',
+            ? `Saved the PDF-backed document, but the final workspace sync failed: ${error?.response?.data?.detail ?? error?.message ?? 'Failed to push the Lean playground file.'}`
+            : error?.response?.data?.detail ?? error?.message ?? 'Failed to push the Lean playground file.',
           'error',
         );
       }
@@ -851,8 +1113,21 @@ export function LeanPlayground({
     try {
       const url = new URL(window.location.href);
       url.searchParams.set('view', 'playground');
-      url.searchParams.set('leanCode', encodeSharedCode(currentCode));
-      url.searchParams.set('leanTitle', currentTitle);
+      if (activeProjectSlug) {
+        url.searchParams.set('project', activeProjectSlug);
+        if (savedWorkspacePath) {
+          url.searchParams.set('projectFile', savedWorkspacePath);
+        } else {
+          url.searchParams.delete('projectFile');
+        }
+        url.searchParams.delete('leanCode');
+        url.searchParams.delete('leanTitle');
+      } else {
+        url.searchParams.set('leanCode', encodeSharedCode(currentCode));
+        url.searchParams.set('leanTitle', currentTitle);
+        url.searchParams.delete('project');
+        url.searchParams.delete('projectFile');
+      }
       await navigator.clipboard.writeText(url.toString());
       setShareState('copied');
     } catch (error) {
@@ -868,6 +1143,14 @@ export function LeanPlayground({
   const handleSelectPdfUpload = () => {
     if (!currentUser) {
       onOpenAuth();
+      return;
+    }
+
+    if (activeProjectSlug) {
+      publishWorkspaceNotice(
+        'PDF uploads are only supported in the shared workspace playground.',
+        'error',
+      );
       return;
     }
 
@@ -887,9 +1170,17 @@ export function LeanPlayground({
       applyDocument({
         code,
         title,
-        source: 'uploaded',
-        proofWorkspaceId: null,
+        source: activeProjectSlug ? 'project' : 'uploaded',
+        proofWorkspaceId: activeProjectSlug ? activeProofWorkspaceId : null,
         pdfFilename: null,
+        workspacePath: savedWorkspacePath,
+        workspaceModule: savedWorkspaceModule,
+        projectSlug: activeProjectSlug,
+        projectTitle: activeProjectTitle,
+        projectRoot: activeProjectRoot,
+        packageName: activeProjectPackageName,
+        projectEntryFilePath: activeProjectEntryFilePath,
+        projectEntryModuleName: activeProjectEntryModuleName,
       });
     } catch (error) {
       console.error('Failed to read uploaded Lean code:', error);
@@ -927,11 +1218,12 @@ export function LeanPlayground({
   };
 
   const lineCount = Math.max(currentCode.split('\n').length, 1);
-  const webSocketUrl = import.meta.env.VITE_LEAN_WS_URL || getDefaultWebSocketUrl();
+  const webSocketUrl = buildWebSocketUrl(activeProjectRoot);
   const workspaceModules = workspaceInfo?.importable_modules ?? [];
   const attachedPdfPreviewUrl = pendingPdfPreviewUrl;
   const attachedPdfDownloadUrl = pendingPdfPreviewUrl;
   const visiblePdfName = pendingPdfFile?.name ?? null;
+  const isProjectMode = Boolean(activeProjectSlug);
 
   return (
     <section className="playground-screen">
@@ -963,7 +1255,9 @@ export function LeanPlayground({
               <div>
                 <div className="formal-editor-title">{currentTitle}</div>
                 <div className="formal-editor-subtitle">
-                  {documentSource === 'workspace'
+                  {documentSource === 'project'
+                    ? 'Loaded from your Lean project workspace'
+                    : documentSource === 'workspace'
                     ? 'Loaded from your proof workspace'
                     : documentSource === 'shared'
                       ? 'Loaded from a shared URL'
@@ -1055,12 +1349,13 @@ export function LeanPlayground({
               <aside className="playground-sidebar-panel">
                 <div className="playground-sidebar-section">
                   <label className="playground-toolbar-group playground-title-field">
-                    <span>Document</span>
+                    <span>{isProjectMode ? 'File' : 'Document'}</span>
                     <input
                       className="input-field"
                       value={currentTitle}
                       onChange={(event) => setCurrentTitle(event.target.value)}
-                      placeholder="Lean document title"
+                      placeholder={isProjectMode ? 'Lean file name' : 'Lean document title'}
+                      readOnly={isProjectMode}
                     />
                   </label>
                 </div>
@@ -1072,17 +1367,19 @@ export function LeanPlayground({
                     onClick={handlePushGithub}
                     disabled={workspaceAction !== 'idle'}
                   >
-                    <Github size={16} />
-                    {workspaceAction === 'pushing' ? 'Saving...' : 'Save / Push'}
+                    {isProjectMode ? <Check size={16} /> : <Github size={16} />}
+                    {workspaceAction === 'pushing' ? 'Saving...' : isProjectMode ? 'Save' : 'Save / Push'}
                   </button>
                   <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
                     <FileUp size={16} />
                     Upload Code
                   </button>
-                  <button type="button" className="button-secondary" onClick={handleSelectPdfUpload}>
-                    <FileUp size={16} />
-                    Upload PDF
-                  </button>
+                  {!isProjectMode && (
+                    <button type="button" className="button-secondary" onClick={handleSelectPdfUpload}>
+                      <FileUp size={16} />
+                      Upload PDF
+                    </button>
+                  )}
                   <button type="button" className="button-secondary" onClick={handleRestartLean}>
                     <ExternalLink size={16} />
                     Restart Lean
@@ -1095,7 +1392,7 @@ export function LeanPlayground({
                     {shareState === 'copied' ? <Check size={16} /> : <Copy size={16} />}
                     {shareState === 'copied' ? 'Link Copied' : 'Share URL'}
                   </button>
-                  {githubRepositoryUrl && (
+                  {githubRepositoryUrl && !isProjectMode && (
                     <button type="button" className="button-secondary" onClick={handleOpenRepository}>
                       <ExternalLink size={16} />
                       Repository
@@ -1117,6 +1414,18 @@ export function LeanPlayground({
                       {savedWorkspacePath}
                     </div>
                   </div>
+                  {isProjectMode && (
+                    <div className="proof-infoview-card">
+                      <div className="proof-infoview-label">Project</div>
+                      <div className="proof-infoview-detail">
+                        {activeProjectTitle || activeProjectSlug}
+                      </div>
+                      <div className="proof-infoview-detail">{activeProjectRoot}</div>
+                      <div className="proof-infoview-detail">
+                        Package `{activeProjectPackageName}` · Entry `{activeProjectEntryModuleName}`
+                      </div>
+                    </div>
+                  )}
                   {pendingPdfFile && attachedPdfPreviewUrl && attachedPdfDownloadUrl && (
                     <div className="proof-infoview-card playground-pdf-card">
                       <div className="proof-infoview-label">PDF Preview</div>
@@ -1159,19 +1468,33 @@ export function LeanPlayground({
                   <div className="proof-infoview-card">
                     <div className="proof-infoview-label">Imports</div>
                     <div className="proof-infoview-detail">
-                      Save or push from the playground, then import any module below from the shared
-                      Lean project.
+                      {isProjectMode
+                        ? 'Project files keep the `import <Package>.Main` convention and build inside the selected project root.'
+                        : 'Save or push from the playground, then import any module below from the shared Lean project.'}
                     </div>
-                    <div className="playground-import-list">
-                      {workspaceModules.slice(0, 8).map((item) => (
-                        <code key={item.path}>{`import ${item.module}`}</code>
-                      ))}
-                    </div>
+                    {isProjectMode ? (
+                      <div className="playground-import-list">
+                        {activeProjectEntryModuleName && (
+                          <code>{`import ${activeProjectEntryModuleName}`}</code>
+                        )}
+                        {activeProjectPackageName && (
+                          <code>{`import ${activeProjectPackageName}`}</code>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="playground-import-list">
+                        {workspaceModules.slice(0, 8).map((item) => (
+                          <code key={item.path}>{`import ${item.module}`}</code>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="proof-infoview-card">
                     <div className="proof-infoview-label">Share</div>
                     <div className="proof-infoview-detail">
-                      Copy a URL snapshot of the current code, similar to the official Lean live editor.
+                      {isProjectMode
+                        ? 'Copy a URL that reopens the selected project root and file.'
+                        : 'Copy a URL snapshot of the current code, similar to the official Lean live editor.'}
                     </div>
                   </div>
                   <div className="proof-infoview-card">
