@@ -184,6 +184,17 @@ def sync_playground_file(
     )
 
 
+@router.post("/save-playground", response_model=SyncPlaygroundResponse)
+def save_playground_file_legacy(
+    payload: SyncPlaygroundRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SyncPlaygroundResponse:
+    # Backward-compatible alias for older frontend bundles still posting to
+    # /lean-workspace/save-playground.
+    return sync_playground_file(payload, current_user=current_user, db=db)
+
+
 @router.post("/push-playground", response_model=SyncPlaygroundResponse)
 async def push_playground_file(
     payload: PushPlaygroundRequest,
