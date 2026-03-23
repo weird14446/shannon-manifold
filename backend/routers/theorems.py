@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
@@ -12,9 +13,8 @@ from models.proof_workspace import ProofWorkspace
 from models.user import User
 from security import get_current_user, get_current_user_optional
 from services.lean_workspace import LeanWorkspaceError, build_workspace_module, delete_workspace_file, write_workspace_file
+from services.project_workspace import canonicalize_project_root, module_name_from_project_path
 from services.rag_index import (
-    cleanup_duplicate_verified_documents,
-    cleanup_missing_workspace_documents,
     delete_indexed_document,
     sync_playground_document_to_rag,
     sync_proof_workspace_to_rag,
@@ -40,6 +40,10 @@ class TheoremSummaryResponse(BaseModel):
     proof_workspace_id: int | None
     has_pdf: bool
     pdf_filename: str | None
+    project_root: str | None = None
+    project_slug: str | None = None
+    project_title: str | None = None
+    project_owner_slug: str | None = None
 
 
 class TheoremDetailResponse(TheoremSummaryResponse):
@@ -49,6 +53,10 @@ class TheoremDetailResponse(TheoremSummaryResponse):
 class TheoremUpdateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     content: str = Field(min_length=1)
+
+
+def _normalize_project_file_path(path: str) -> str:
+    return Path(path.strip().replace("\\", "/")).as_posix().lstrip("/")
 
 
 def _build_workspace_lookup(
@@ -78,6 +86,14 @@ def _build_summary(
     workspace_lookup: dict[int, ProofWorkspace],
     current_user: User | None = None,
 ) -> TheoremSummaryResponse:
+    metadata: dict[str, object] = {}
+    try:
+        parsed_metadata = json.loads(document.metadata_json or "{}")
+        if isinstance(parsed_metadata, dict):
+            metadata = parsed_metadata
+    except (TypeError, ValueError):
+        metadata = {}
+
     workspace = (
         workspace_lookup.get(document.source_ref_id)
         if document.source_kind == "proof_workspace" and document.source_ref_id is not None
@@ -113,6 +129,10 @@ def _build_summary(
         proof_workspace_id=workspace.id if workspace is not None else None,
         has_pdf=bool(workspace and workspace.pdf_path),
         pdf_filename=workspace.source_filename if workspace and workspace.pdf_path else None,
+        project_root=str(metadata.get("project_root")) if metadata.get("project_root") else None,
+        project_slug=str(metadata.get("project_slug")) if metadata.get("project_slug") else None,
+        project_title=str(metadata.get("project_title")) if metadata.get("project_title") else None,
+        project_owner_slug=str(metadata.get("owner_slug")) if metadata.get("owner_slug") else None,
     )
 
 
@@ -185,11 +205,6 @@ async def get_theorems(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[TheoremSummaryResponse]:
-    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
-    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
-    if cleaned:
-        db.commit()
-
     documents = (
         db.query(CodeDocument)
         .filter(
@@ -204,17 +219,72 @@ async def get_theorems(
     return [_build_summary(document, workspace_lookup, current_user) for document in documents]
 
 
+@router.get("/lookup/project-module", response_model=TheoremSummaryResponse)
+async def get_theorem_for_project_module(
+    project_root: str = Query(min_length=1),
+    project_file_path: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> TheoremSummaryResponse:
+    normalized_project_root = canonicalize_project_root(project_root)
+    normalized_project_file_path = _normalize_project_file_path(project_file_path)
+    expected_module_name = module_name_from_project_path(normalized_project_file_path)
+    expected_title = Path(normalized_project_file_path).stem
+
+    candidate_documents = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.is_verified.is_(True),
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind.in_(("proof_workspace", "playground")),
+            CodeDocument.metadata_json.contains(normalized_project_root),
+        )
+        .all()
+    )
+
+    best_match: tuple[int, CodeDocument] | None = None
+    for document in candidate_documents:
+        try:
+            metadata = json.loads(document.metadata_json or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("project_root") != normalized_project_root:
+            continue
+
+        score = 0
+        if metadata.get("project_file_path") == normalized_project_file_path:
+            score += 100
+        if metadata.get("project_module_name") == expected_module_name:
+            score += 80
+        if document.title == expected_title:
+            score += 40
+        if document.module_name == expected_module_name:
+            score += 20
+
+        if score <= 0:
+            continue
+        if best_match is None or score > best_match[0]:
+            best_match = (score, document)
+
+    if best_match is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No verified database entry exists for this project module yet.",
+        )
+
+    document = best_match[1]
+    workspace_lookup = _build_workspace_lookup(db, [document])
+    return _build_summary(document, workspace_lookup, current_user)
+
+
 @router.get("/{document_id}", response_model=TheoremDetailResponse)
 async def get_theorem_detail(
     document_id: int,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> TheoremDetailResponse:
-    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
-    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
-    if cleaned:
-        db.commit()
-
     document = (
         db.query(CodeDocument)
         .filter(

@@ -8,7 +8,6 @@ import {
   ExternalLink,
   FileText,
   FileUp,
-  Github,
   LoaderCircle,
   RotateCcw,
   Sparkles,
@@ -17,14 +16,22 @@ import {
 import { LeanMonaco, LeanMonacoEditor, type LeanMonacoOptions } from 'lean4monaco';
 import {
   getLeanWorkspaceInfo,
+  getTheoremDetail,
+  listProjectModules,
+  getProofWorkspacePdfUrl,
+  listProjects,
   openProject,
-  pushLeanPlaygroundToGithub,
-  saveProjectFile,
+  syncLeanPlaygroundToWorkspace,
+  updateProject,
   uploadProofPdf,
   type ChatCodeContextPayload,
   type AuthUser,
+  type IndexedProofDetail,
   type LeanWorkspaceInfo,
+  type ProjectModule,
+  type ProjectSummary,
 } from '../../api';
+import { VerifiedModulePreviewCard } from './VerifiedModulePreviewCard';
 import 'lean4monaco/dist/css/custom.css';
 import 'lean4monaco/dist/css/vscode_webview.css';
 
@@ -46,9 +53,13 @@ export interface LeanPlaygroundSeed {
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
   projectSlug?: string | null;
+  projectOwnerSlug?: string | null;
   projectTitle?: string | null;
   projectRoot?: string | null;
   packageName?: string | null;
+  projectGithubUrl?: string | null;
+  projectVisibility?: 'public' | 'private' | null;
+  projectCanEdit?: boolean | null;
   projectFilePath?: string | null;
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
@@ -62,7 +73,6 @@ interface LeanPlaygroundProps {
   onLogout: () => void;
   onDocumentChange?: (snapshot: ChatCodeContextPayload) => void;
   onAttachmentChange?: (file: File | null) => void;
-  onPushSuccess?: () => void;
 }
 
 interface PlaygroundDocument {
@@ -71,9 +81,13 @@ interface PlaygroundDocument {
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
   projectSlug?: string | null;
+  projectOwnerSlug?: string | null;
   projectTitle?: string | null;
   projectRoot?: string | null;
   packageName?: string | null;
+  projectGithubUrl?: string | null;
+  projectVisibility?: 'public' | 'private' | null;
+  projectCanEdit?: boolean | null;
   projectFilePath?: string | null;
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
@@ -173,6 +187,7 @@ const readDocumentFromStorage = (): PlaygroundDocument | null => {
 };
 
 const LEAN_IMPORT_RE = /^\s*import\s+(.+?)\s*$/gm;
+const LEAN_FILENAME_TOKEN_RE = /[A-Za-z0-9]+/g;
 
 const parseLeanImports = (code: string) => {
   const modules: string[] = [];
@@ -184,6 +199,44 @@ const parseLeanImports = (code: string) => {
     modules.push(...items);
   }
   return [...new Set(modules)];
+};
+
+const normalizeLeanFileStem = (value: string, fallbackStem: string) => {
+  const parts = value.trim().match(LEAN_FILENAME_TOKEN_RE) ?? [];
+  if (parts.length > 0) {
+    const stem = parts.map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join('');
+    return /^\d/.test(stem) ? `Doc${stem}` : stem;
+  }
+
+  return fallbackStem;
+};
+
+const resolveSharedWorkspaceTarget = (title: string) => {
+  const configuredPath = PLAYGROUND_FILE_PATH.replace(/^\/+/, '');
+  const segments = configuredPath.split('/').filter(Boolean);
+  const filename = segments.pop() ?? 'Playground.lean';
+  const parent = segments.join('/');
+  const fallbackStem = filename.replace(/\.lean$/i, '') || 'Playground';
+  const stem = normalizeLeanFileStem(title, fallbackStem);
+  const path = parent ? `${parent}/${stem}.lean` : `${stem}.lean`;
+  return {
+    path,
+    module: path.replace(/\.lean$/i, '').split('/').join('.'),
+  };
+};
+
+const resolveProjectWorkspaceTarget = (
+  packageName: string,
+  title: string,
+  entryFilePath?: string | null,
+) => {
+  const fallbackStem = entryFilePath?.split('/').pop()?.replace(/\.lean$/i, '') || 'Main';
+  const stem = normalizeLeanFileStem(title, fallbackStem);
+  return {
+    title: stem,
+    path: `${packageName}/${stem}.lean`,
+    module: `${packageName}.${stem}`,
+  };
 };
 
 const getLineText = (code: string, line: number) => {
@@ -236,9 +289,13 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
       projectSlug: seed.projectSlug ?? null,
+      projectOwnerSlug: seed.projectOwnerSlug ?? null,
       projectTitle: seed.projectTitle ?? null,
       projectRoot: seed.projectRoot ?? null,
       packageName: seed.packageName ?? null,
+      projectGithubUrl: seed.projectGithubUrl ?? null,
+      projectVisibility: seed.projectVisibility ?? null,
+      projectCanEdit: seed.projectCanEdit ?? null,
       projectFilePath: seed.projectFilePath ?? null,
       projectModuleName: seed.projectModuleName ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
@@ -378,11 +435,9 @@ export function LeanPlayground({
   onLogout,
   onDocumentChange,
   onAttachmentChange,
-  onPushSuccess,
 }: LeanPlaygroundProps) {
   const sharedDocument = readDocumentFromUrl();
   const initialDocument = resolveInitialDocument(seed);
-  const githubRepositoryUrl = import.meta.env.VITE_GITHUB_REPOSITORY_URL?.trim();
   const [currentCode, setCurrentCode] = useState(initialDocument.code);
   const [currentTitle, setCurrentTitle] = useState(initialDocument.title);
   const [documentSource, setDocumentSource] = useState<string>(
@@ -393,7 +448,6 @@ export function LeanPlayground({
   const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [baselineDocument, setBaselineDocument] = useState(initialDocument);
   const [workspaceInfo, setWorkspaceInfo] = useState<LeanWorkspaceInfo | null>(null);
-  const [workspaceAction, setWorkspaceAction] = useState<'idle' | 'pushing'>('idle');
   const [workspaceNotice, setWorkspaceNotice] = useState('');
   const [workspaceNoticeTone, setWorkspaceNoticeTone] = useState<'success' | 'error'>('success');
   const [savedWorkspacePath, setSavedWorkspacePath] = useState(
@@ -411,6 +465,9 @@ export function LeanPlayground({
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(
     initialDocument.projectSlug ?? null,
   );
+  const [activeProjectOwnerSlug, setActiveProjectOwnerSlug] = useState<string | null>(
+    initialDocument.projectOwnerSlug ?? null,
+  );
   const [activeProjectTitle, setActiveProjectTitle] = useState<string | null>(
     initialDocument.projectTitle ?? null,
   );
@@ -420,15 +477,39 @@ export function LeanPlayground({
   const [activeProjectPackageName, setActiveProjectPackageName] = useState<string | null>(
     initialDocument.packageName ?? null,
   );
+  const [activeProjectGithubUrl, setActiveProjectGithubUrl] = useState<string | null>(
+    initialDocument.projectGithubUrl ?? null,
+  );
+  const [activeProjectVisibility, setActiveProjectVisibility] = useState<'public' | 'private'>(
+    initialDocument.projectVisibility ?? 'private',
+  );
+  const [activeProjectCanEdit, setActiveProjectCanEdit] = useState(
+    initialDocument.projectCanEdit ?? true,
+  );
+  const [projectGithubUrlDraft, setProjectGithubUrlDraft] = useState(
+    initialDocument.projectGithubUrl ?? '',
+  );
   const [activeProjectEntryFilePath, setActiveProjectEntryFilePath] = useState<string | null>(
     initialDocument.projectEntryFilePath ?? null,
   );
   const [activeProjectEntryModuleName, setActiveProjectEntryModuleName] = useState<string | null>(
     initialDocument.projectEntryModuleName ?? null,
   );
-  const [attachedPdfFilename, setAttachedPdfFilename] = useState<string | null>(null);
+  const [availableProjects, setAvailableProjects] = useState<ProjectSummary[]>([]);
+  const [projectModules, setProjectModules] = useState<ProjectModule[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [isLoadingProjectModules, setIsLoadingProjectModules] = useState(false);
+  const [openingProjectModulePath, setOpeningProjectModulePath] = useState<string | null>(null);
+  const [previewModuleDetail, setPreviewModuleDetail] = useState<IndexedProofDetail | null>(null);
+  const [previewModuleError, setPreviewModuleError] = useState('');
+  const [previewModulePath, setPreviewModulePath] = useState<string | null>(null);
+  const [isSavingProjectLink, setIsSavingProjectLink] = useState(false);
+  const [attachedPdfFilename, setAttachedPdfFilename] = useState<string | null>(
+    initialDocument.pdfFilename ?? null,
+  );
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const [pendingPdfPreviewUrl, setPendingPdfPreviewUrl] = useState<string | null>(null);
+  const [isUploadingToDatabase, setIsUploadingToDatabase] = useState(false);
   const editorModelPath = toEditorModelPath(savedWorkspacePath);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -452,6 +533,55 @@ export function LeanPlayground({
     () => extractActiveGoal(infoviewSnapshot),
     [infoviewSnapshot],
   );
+  const projectSelectionValue = activeProjectSlug
+    ? `${activeProjectOwnerSlug ?? ''}:${activeProjectSlug}`
+    : '';
+  const selectableProjects = useMemo(() => {
+    const ownedProjects = availableProjects.filter((project) => project.can_edit);
+    if (
+      activeProjectSlug &&
+      activeProjectOwnerSlug &&
+      !ownedProjects.some(
+        (project) =>
+          project.slug === activeProjectSlug && project.owner_slug === activeProjectOwnerSlug,
+      )
+    ) {
+      return [
+        {
+          title: activeProjectTitle ?? activeProjectSlug,
+          slug: activeProjectSlug,
+          owner_slug: activeProjectOwnerSlug,
+          project_root: activeProjectRoot ?? '',
+          package_name: activeProjectPackageName ?? '',
+          entry_file_path:
+            activeProjectEntryFilePath ??
+            `${activeProjectPackageName ?? 'Project'}/${currentTitle || 'Main'}.lean`,
+          entry_module_name:
+            activeProjectEntryModuleName ??
+            `${activeProjectPackageName ?? 'Project'}.${currentTitle || 'Main'}`,
+          github_url: activeProjectGithubUrl ?? null,
+          visibility: activeProjectVisibility,
+          can_edit: activeProjectCanEdit,
+          can_delete: activeProjectCanEdit,
+        },
+        ...ownedProjects,
+      ];
+    }
+    return ownedProjects;
+  }, [
+    activeProjectCanEdit,
+    activeProjectEntryFilePath,
+    activeProjectEntryModuleName,
+    activeProjectGithubUrl,
+    activeProjectOwnerSlug,
+    activeProjectPackageName,
+    activeProjectRoot,
+    activeProjectSlug,
+    activeProjectTitle,
+    activeProjectVisibility,
+    availableProjects,
+    currentTitle,
+  ]);
 
   const replacePendingPdf = (file: File | null) => {
     if (pendingPdfPreviewUrl?.startsWith('blob:')) {
@@ -467,44 +597,195 @@ export function LeanPlayground({
     setWorkspaceNotice(message);
   };
 
+  const commitProjectFileName = (rawTitle = currentTitle) => {
+    if (!activeProjectSlug || !activeProjectPackageName) {
+      return {
+        title: rawTitle,
+        path: savedWorkspacePath,
+        module: savedWorkspaceModule,
+      };
+    }
+
+    const nextTarget = resolveProjectWorkspaceTarget(
+      activeProjectPackageName,
+      rawTitle,
+      activeProjectEntryFilePath,
+    );
+    if (nextTarget.title !== currentTitle) {
+      setCurrentTitle(nextTarget.title);
+    }
+    if (nextTarget.path !== savedWorkspacePath) {
+      setSavedWorkspacePath(nextTarget.path);
+    }
+    if (nextTarget.module !== savedWorkspaceModule) {
+      setSavedWorkspaceModule(nextTarget.module);
+    }
+    return nextTarget;
+  };
+
+  const applyProjectSelection = (project: ProjectSummary | null) => {
+    setPreviewModuleDetail(null);
+    setPreviewModuleError('');
+    setPreviewModulePath(null);
+    if (!project) {
+      const sharedTarget = resolveSharedWorkspaceTarget(currentTitle);
+      setActiveProjectSlug(null);
+      setActiveProjectOwnerSlug(null);
+      setActiveProjectTitle(null);
+      setActiveProjectRoot(null);
+      setActiveProjectPackageName(null);
+      setActiveProjectGithubUrl(null);
+      setActiveProjectVisibility('private');
+      setActiveProjectCanEdit(true);
+      setProjectGithubUrlDraft('');
+      setActiveProjectEntryFilePath(null);
+      setActiveProjectEntryModuleName(null);
+      setSavedWorkspacePath(sharedTarget.path);
+      setSavedWorkspaceModule(sharedTarget.module);
+      return;
+    }
+
+    const nextTarget = resolveProjectWorkspaceTarget(
+      project.package_name,
+      currentTitle,
+      project.entry_file_path,
+    );
+    setCurrentTitle(nextTarget.title);
+    setActiveProjectSlug(project.slug);
+    setActiveProjectOwnerSlug(project.owner_slug);
+    setActiveProjectTitle(project.title);
+    setActiveProjectRoot(project.project_root);
+    setActiveProjectPackageName(project.package_name);
+    setActiveProjectGithubUrl(project.github_url);
+    setActiveProjectVisibility(project.visibility);
+    setActiveProjectCanEdit(project.can_edit);
+    setProjectGithubUrlDraft(project.github_url ?? '');
+    setActiveProjectEntryFilePath(project.entry_file_path);
+    setActiveProjectEntryModuleName(project.entry_module_name);
+    setSavedWorkspacePath(nextTarget.path);
+    setSavedWorkspaceModule(nextTarget.module);
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
-    window.localStorage.setItem(
-      PLAYGROUND_STORAGE_KEY,
-      JSON.stringify({
-        code: currentCode,
-        title: currentTitle,
-        proofWorkspaceId: activeProofWorkspaceId,
-        pdfFilename: null,
-        projectSlug: activeProjectSlug,
-        projectTitle: activeProjectTitle,
-        projectRoot: activeProjectRoot,
-        packageName: activeProjectPackageName,
-        projectFilePath: savedWorkspacePath,
-        projectModuleName: savedWorkspaceModule,
-        projectEntryFilePath: activeProjectEntryFilePath,
-        projectEntryModuleName: activeProjectEntryModuleName,
-      }),
-    );
-
     latestCodeRef.current = currentCode;
+    const persistTimer = window.setTimeout(() => {
+      window.localStorage.setItem(
+        PLAYGROUND_STORAGE_KEY,
+        JSON.stringify({
+          code: currentCode,
+          title: currentTitle,
+          proofWorkspaceId: activeProofWorkspaceId,
+          pdfFilename: attachedPdfFilename,
+          projectSlug: activeProjectSlug,
+          projectOwnerSlug: activeProjectOwnerSlug,
+          projectTitle: activeProjectTitle,
+          projectRoot: activeProjectRoot,
+          packageName: activeProjectPackageName,
+          projectGithubUrl: activeProjectGithubUrl,
+          projectVisibility: activeProjectVisibility,
+          projectCanEdit: activeProjectCanEdit,
+          projectFilePath: savedWorkspacePath,
+          projectModuleName: savedWorkspaceModule,
+          projectEntryFilePath: activeProjectEntryFilePath,
+          projectEntryModuleName: activeProjectEntryModuleName,
+        }),
+      );
+    }, 250);
+
+    return () => window.clearTimeout(persistTimer);
   }, [
     activeProofWorkspaceId,
     activeProjectEntryFilePath,
     activeProjectEntryModuleName,
+    activeProjectGithubUrl,
+    activeProjectOwnerSlug,
     activeProjectPackageName,
+    activeProjectCanEdit,
     activeProjectRoot,
     activeProjectSlug,
     activeProjectTitle,
+    activeProjectVisibility,
     attachedPdfFilename,
     currentCode,
     currentTitle,
     savedWorkspaceModule,
     savedWorkspacePath,
   ]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!currentUser) {
+      setAvailableProjects([]);
+      setIsLoadingProjects(false);
+      return;
+    }
+
+    const loadProjects = async () => {
+      setIsLoadingProjects(true);
+      try {
+        const items = await listProjects();
+        if (isMounted) {
+          setAvailableProjects(items);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Failed to load selectable projects:', error);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingProjects(false);
+        }
+      }
+    };
+
+    void loadProjects();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!activeProjectSlug) {
+      setProjectModules([]);
+      setIsLoadingProjectModules(false);
+      return;
+    }
+
+    const loadProjectModules = async () => {
+      setIsLoadingProjectModules(true);
+      try {
+        const items = await listProjectModules(
+          activeProjectSlug,
+          activeProjectOwnerSlug ?? undefined,
+        );
+        if (isMounted) {
+          setProjectModules(items);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Failed to load project modules:', error);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingProjectModules(false);
+        }
+      }
+    };
+
+    void loadProjectModules();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProjectOwnerSlug, activeProjectSlug]);
 
   useEffect(() => {
     return () => {
@@ -538,11 +819,12 @@ export function LeanPlayground({
       proof_state: infoviewSnapshot || null,
       active_goal: activeGoal || null,
       proof_workspace_id: activeProofWorkspaceId,
-      attached_pdf_filename: pendingPdfFile?.name ?? null,
+      attached_pdf_filename: pendingPdfFile?.name ?? attachedPdfFilename ?? null,
     });
   }, [
     activeGoal,
     activeProofWorkspaceId,
+    attachedPdfFilename,
     currentCode,
     currentTitle,
     cursorLineText,
@@ -792,9 +1074,13 @@ export function LeanPlayground({
       workspacePath: seed.projectFilePath ?? savedWorkspacePath,
       workspaceModule: seed.projectModuleName ?? savedWorkspaceModule,
       projectSlug: seed.projectSlug ?? null,
+      projectOwnerSlug: seed.projectOwnerSlug ?? null,
       projectTitle: seed.projectTitle ?? null,
       projectRoot: seed.projectRoot ?? null,
       packageName: seed.packageName ?? null,
+      projectGithubUrl: seed.projectGithubUrl ?? null,
+      projectVisibility: seed.projectVisibility ?? null,
+      projectCanEdit: seed.projectCanEdit ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
       projectEntryModuleName: seed.projectEntryModuleName ?? null,
     });
@@ -807,17 +1093,21 @@ export function LeanPlayground({
     seed?.projectEntryFilePath,
     seed?.projectEntryModuleName,
     seed?.projectFilePath,
+    seed?.projectGithubUrl,
+    seed?.projectOwnerSlug,
     seed?.projectModuleName,
+    seed?.projectCanEdit,
     seed?.projectRoot,
     seed?.projectSlug,
     seed?.projectTitle,
+    seed?.projectVisibility,
     seed?.proofWorkspaceId,
     seed?.revision,
     seed?.title,
   ]);
 
   useEffect(() => {
-    if (!seed?.projectSlug || !currentUser) {
+    if (!seed?.projectSlug) {
       return;
     }
     if (seed.code) {
@@ -828,7 +1118,11 @@ export function LeanPlayground({
 
     const loadProjectDocument = async () => {
       try {
-        const project = await openProject(seed.projectSlug!, seed.projectFilePath ?? undefined);
+        const project = await openProject(
+          seed.projectSlug!,
+          seed.projectFilePath ?? undefined,
+          seed.projectOwnerSlug ?? undefined,
+        );
         if (!isMounted) {
           return;
         }
@@ -841,9 +1135,13 @@ export function LeanPlayground({
           workspacePath: project.workspace_file_path,
           workspaceModule: project.workspace_module_name,
           projectSlug: project.slug,
+          projectOwnerSlug: project.owner_slug,
           projectTitle: project.title,
           projectRoot: project.project_root,
           packageName: project.package_name,
+          projectGithubUrl: project.github_url,
+          projectVisibility: project.visibility,
+          projectCanEdit: project.can_edit,
           projectEntryFilePath: project.entry_file_path,
           projectEntryModuleName: project.entry_module_name,
         });
@@ -870,11 +1168,11 @@ export function LeanPlayground({
       isMounted = false;
     };
   }, [
-    currentUser,
     onLogout,
     onOpenAuth,
     seed?.code,
     seed?.projectFilePath,
+    seed?.projectOwnerSlug,
     seed?.projectSlug,
     seed?.revision,
   ]);
@@ -888,9 +1186,13 @@ export function LeanPlayground({
     workspacePath = savedWorkspacePath,
     workspaceModule = savedWorkspaceModule,
     projectSlug = null,
+    projectOwnerSlug = null,
     projectTitle = null,
     projectRoot = null,
     packageName = null,
+    projectGithubUrl = null,
+    projectVisibility = null,
+    projectCanEdit = null,
     projectEntryFilePath = null,
     projectEntryModuleName = null,
   }: {
@@ -902,12 +1204,19 @@ export function LeanPlayground({
     workspacePath?: string;
     workspaceModule?: string;
     projectSlug?: string | null;
+    projectOwnerSlug?: string | null;
     projectTitle?: string | null;
     projectRoot?: string | null;
     packageName?: string | null;
+    projectGithubUrl?: string | null;
+    projectVisibility?: 'public' | 'private' | null;
+    projectCanEdit?: boolean | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
   }) => {
+    setPreviewModuleDetail(null);
+    setPreviewModuleError('');
+    setPreviewModulePath(null);
     latestCodeRef.current = code;
     setCurrentCode(code);
     setCurrentTitle(title);
@@ -916,9 +1225,14 @@ export function LeanPlayground({
     setSavedWorkspacePath(workspacePath);
     setSavedWorkspaceModule(workspaceModule);
     setActiveProjectSlug(projectSlug);
+    setActiveProjectOwnerSlug(projectOwnerSlug);
     setActiveProjectTitle(projectTitle);
     setActiveProjectRoot(projectRoot);
     setActiveProjectPackageName(packageName);
+    setActiveProjectGithubUrl(projectGithubUrl);
+    setActiveProjectVisibility(projectVisibility ?? 'private');
+    setActiveProjectCanEdit(projectCanEdit ?? true);
+    setProjectGithubUrlDraft(projectGithubUrl ?? '');
     setActiveProjectEntryFilePath(projectEntryFilePath);
     setActiveProjectEntryModuleName(projectEntryModuleName);
     setAttachedPdfFilename(_pdfFilename);
@@ -928,9 +1242,13 @@ export function LeanPlayground({
       proofWorkspaceId,
       pdfFilename: _pdfFilename,
       projectSlug,
+      projectOwnerSlug,
       projectTitle,
       projectRoot,
       packageName,
+      projectGithubUrl,
+      projectVisibility,
+      projectCanEdit,
       projectFilePath: workspacePath,
       projectModuleName: workspaceModule,
       projectEntryFilePath,
@@ -963,9 +1281,13 @@ export function LeanPlayground({
       workspacePath: baselineDocument.projectFilePath ?? savedWorkspacePath,
       workspaceModule: baselineDocument.projectModuleName ?? savedWorkspaceModule,
       projectSlug: baselineDocument.projectSlug ?? null,
+      projectOwnerSlug: baselineDocument.projectOwnerSlug ?? null,
       projectTitle: baselineDocument.projectTitle ?? null,
       projectRoot: baselineDocument.projectRoot ?? null,
       packageName: baselineDocument.packageName ?? null,
+      projectGithubUrl: baselineDocument.projectGithubUrl ?? null,
+      projectVisibility: baselineDocument.projectVisibility ?? null,
+      projectCanEdit: baselineDocument.projectCanEdit ?? null,
       projectEntryFilePath: baselineDocument.projectEntryFilePath ?? null,
       projectEntryModuleName: baselineDocument.projectEntryModuleName ?? null,
     });
@@ -973,136 +1295,6 @@ export function LeanPlayground({
 
   const handleRestartLean = () => {
     leanMonacoRef.current?.restart();
-  };
-
-  const handlePushGithub = async () => {
-    if (!currentUser) {
-      onOpenAuth();
-      return;
-    }
-
-    if (activeProjectSlug && !savedWorkspacePath) {
-      publishWorkspaceNotice('Open a project file before saving.', 'error');
-      return;
-    }
-
-    setWorkspaceAction('pushing');
-    setWorkspaceNotice('');
-    let persistedWorkspace:
-      | {
-        id: number;
-        title: string;
-        lean4_code: string;
-        pdf_filename?: string | null;
-        source_filename?: string | null;
-      }
-      | null = null;
-
-    try {
-      if (activeProjectSlug) {
-        if (pendingPdfFile) {
-          throw new Error('PDF uploads are only supported in the shared workspace playground.');
-        }
-
-        const response = await saveProjectFile(activeProjectSlug, {
-          path: savedWorkspacePath,
-          content: currentCode,
-        });
-        setSavedWorkspacePath(response.workspace_file_path);
-        setSavedWorkspaceModule(response.workspace_module_name);
-        setBaselineDocument((current) => ({
-          ...current,
-          code: currentCode,
-          title: currentTitle,
-          projectFilePath: response.workspace_file_path,
-          projectModuleName: response.workspace_module_name,
-        }));
-        leanMonacoRef.current?.restart();
-        publishWorkspaceNotice(
-          `Saved ${response.workspace_module_name} in ${activeProjectRoot ?? 'the selected project'}.`,
-          'success',
-        );
-        return;
-      }
-
-      let nextTitle = currentTitle;
-      let nextCode = currentCode;
-      let nextProofWorkspaceId = activeProofWorkspaceId;
-
-      if (pendingPdfFile) {
-        const fallbackTitle = pendingPdfFile.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
-        const normalizedTitle =
-          currentTitle.trim() && currentTitle.trim() !== DEFAULT_DOCUMENT.title
-            ? currentTitle.trim()
-            : fallbackTitle;
-        const workspace = await uploadProofPdf(normalizedTitle, pendingPdfFile, {
-          workspace_id: activeProofWorkspaceId,
-          lean4_code: hasMeaningfulLeanCode(currentCode) ? currentCode : null,
-        });
-        persistedWorkspace = workspace;
-        nextTitle = workspace.title;
-        nextCode = workspace.lean4_code;
-        nextProofWorkspaceId = workspace.id;
-        replacePendingPdf(null);
-        applyDocument({
-          code: workspace.lean4_code,
-          title: workspace.title,
-          source: 'workspace',
-          proofWorkspaceId: workspace.id,
-          pdfFilename: null,
-        });
-      }
-
-      const response = await pushLeanPlaygroundToGithub({
-        code: nextCode,
-        title: nextTitle,
-        proof_workspace_id: nextProofWorkspaceId,
-      });
-      setWorkspaceInfo(response);
-      setSavedWorkspacePath(response.saved_path);
-      setSavedWorkspaceModule(response.saved_module);
-      if (!persistedWorkspace) {
-        setActiveProofWorkspaceId(response.proof_workspace_id ?? null);
-        setAttachedPdfFilename(null);
-      }
-      leanMonacoRef.current?.restart();
-      if (persistedWorkspace) {
-        publishWorkspaceNotice(
-          response.pushed
-            ? `Saved the PDF-backed Lean document, updated the verified database entry, and pushed ${response.saved_module} to GitHub.`
-            : `Saved the PDF-backed Lean document and updated the verified database entry locally.`,
-          'success',
-        );
-      } else {
-        publishWorkspaceNotice(
-          response.pushed
-            ? response.remote_content_url
-              ? `Built ${response.saved_module} for import and pushed it to GitHub.`
-              : `Built ${response.saved_module} for import and updated the configured repository.`
-            : response.repository_url
-              ? `Built ${response.saved_module} for import locally. Set GITHUB_ACCESS_TOKEN to push it to GitHub.`
-              : `Built ${response.saved_module} for import in the Lean workspace.`,
-          'success',
-        );
-      }
-      onPushSuccess?.();
-    } catch (error: any) {
-      console.error('Failed to push Lean playground file:', error);
-      if (error?.response?.status === 401) {
-        onLogout();
-        onOpenAuth();
-        publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
-      } else {
-        publishWorkspaceNotice(
-          persistedWorkspace
-            ? `Saved the PDF-backed document, but the final workspace sync failed: ${error?.response?.data?.detail ?? error?.message ?? 'Failed to push the Lean playground file.'}`
-            : error?.response?.data?.detail ?? error?.message ?? 'Failed to push the Lean playground file.',
-          'error',
-        );
-      }
-    } finally {
-      setWorkspaceAction('idle');
-    }
   };
 
   const handleCopyShareLink = async () => {
@@ -1115,6 +1307,11 @@ export function LeanPlayground({
       url.searchParams.set('view', 'playground');
       if (activeProjectSlug) {
         url.searchParams.set('project', activeProjectSlug);
+        if (activeProjectOwnerSlug) {
+          url.searchParams.set('projectOwner', activeProjectOwnerSlug);
+        } else {
+          url.searchParams.delete('projectOwner');
+        }
         if (savedWorkspacePath) {
           url.searchParams.set('projectFile', savedWorkspacePath);
         } else {
@@ -1126,6 +1323,7 @@ export function LeanPlayground({
         url.searchParams.set('leanCode', encodeSharedCode(currentCode));
         url.searchParams.set('leanTitle', currentTitle);
         url.searchParams.delete('project');
+        url.searchParams.delete('projectOwner');
         url.searchParams.delete('projectFile');
       }
       await navigator.clipboard.writeText(url.toString());
@@ -1141,19 +1339,6 @@ export function LeanPlayground({
   };
 
   const handleSelectPdfUpload = () => {
-    if (!currentUser) {
-      onOpenAuth();
-      return;
-    }
-
-    if (activeProjectSlug) {
-      publishWorkspaceNotice(
-        'PDF uploads are only supported in the shared workspace playground.',
-        'error',
-      );
-      return;
-    }
-
     pdfUploadInputRef.current?.click();
   };
 
@@ -1176,9 +1361,13 @@ export function LeanPlayground({
         workspacePath: savedWorkspacePath,
         workspaceModule: savedWorkspaceModule,
         projectSlug: activeProjectSlug,
+        projectOwnerSlug: activeProjectOwnerSlug,
         projectTitle: activeProjectTitle,
         projectRoot: activeProjectRoot,
         packageName: activeProjectPackageName,
+        projectGithubUrl: activeProjectGithubUrl,
+        projectVisibility: activeProjectVisibility,
+        projectCanEdit: activeProjectCanEdit,
         projectEntryFilePath: activeProjectEntryFilePath,
         projectEntryModuleName: activeProjectEntryModuleName,
       });
@@ -1205,16 +1394,242 @@ export function LeanPlayground({
 
   const handleCancelPendingPdfUpload = () => {
     replacePendingPdf(null);
-    setAttachedPdfFilename(null);
+    setAttachedPdfFilename(baselineDocument.pdfFilename ?? null);
     setWorkspaceNotice('');
   };
 
-  const handleOpenRepository = () => {
-    if (!githubRepositoryUrl || typeof window === 'undefined') {
+  const handleProjectSelectionChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextValue = event.target.value;
+    if (!nextValue) {
+      applyProjectSelection(null);
       return;
     }
 
-    window.open(githubRepositoryUrl, '_blank', 'noopener,noreferrer');
+    const nextProject = selectableProjects.find(
+      (project) => `${project.owner_slug}:${project.slug}` === nextValue,
+    );
+    if (!nextProject) {
+      return;
+    }
+
+    applyProjectSelection(nextProject);
+  };
+
+  const handleOpenProjectModule = async (module: ProjectModule) => {
+    if (!activeProjectSlug || !module.document_id) {
+      return;
+    }
+
+    setOpeningProjectModulePath(module.path);
+    setPreviewModulePath(module.path);
+    setPreviewModuleError('');
+    setPreviewModuleDetail(null);
+    setWorkspaceNotice('');
+    try {
+      const theorem = await getTheoremDetail(module.document_id);
+      setPreviewModuleDetail(theorem);
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        onLogout();
+        onOpenAuth();
+        setPreviewModuleError('Sign in to open verified code entries.');
+      } else {
+        setPreviewModuleError(
+          error?.response?.data?.detail ?? 'Failed to open the verified database entry for this module.',
+        );
+      }
+    } finally {
+      setOpeningProjectModulePath(null);
+    }
+  };
+
+  const handleUploadToVerifiedDatabase = async () => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+
+    setIsUploadingToDatabase(true);
+    setWorkspaceNotice('');
+
+    try {
+      const preparedProjectTarget = activeProjectSlug ? commitProjectFileName(currentTitle) : null;
+      if (pendingPdfFile) {
+        const fallbackTitle = pendingPdfFile.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
+        const normalizedTitle =
+          activeProjectSlug && preparedProjectTarget
+            ? preparedProjectTarget.title
+            : currentTitle.trim() && currentTitle.trim() !== DEFAULT_DOCUMENT.title
+            ? currentTitle.trim()
+            : fallbackTitle;
+        const workspace = await uploadProofPdf(normalizedTitle, pendingPdfFile, {
+          workspace_id: activeProofWorkspaceId,
+          lean4_code: hasMeaningfulLeanCode(currentCode) ? currentCode : null,
+          project_root: activeProjectRoot,
+          project_file_path: savedWorkspacePath,
+        });
+        const nextTitle = activeProjectSlug ? currentTitle : workspace.title;
+        const nextCode =
+          activeProjectSlug || hasMeaningfulLeanCode(currentCode)
+            ? currentCode
+            : workspace.lean4_code;
+        const nextPdfFilename = workspace.pdf_filename ?? workspace.source_filename ?? pendingPdfFile.name;
+
+        replacePendingPdf(null);
+        setAttachedPdfFilename(nextPdfFilename);
+        setActiveProofWorkspaceId(workspace.id);
+        setBaselineDocument((current) => ({
+          ...current,
+          code: nextCode,
+          title: nextTitle,
+          proofWorkspaceId: workspace.id,
+          pdfFilename: nextPdfFilename,
+          projectFilePath: activeProjectSlug
+            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+            : current.projectFilePath,
+          projectModuleName: activeProjectSlug
+            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
+            : current.projectModuleName,
+        }));
+        if (!activeProjectSlug) {
+          setCurrentTitle(nextTitle);
+          setCurrentCode(nextCode);
+          latestCodeRef.current = nextCode;
+          const model = leanEditorRef.current?.editor?.getModel();
+          if (model && model.getValue() !== nextCode) {
+            applyingExternalCodeRef.current = true;
+            try {
+              model.setValue(nextCode);
+            } finally {
+              applyingExternalCodeRef.current = false;
+            }
+          }
+        }
+        publishWorkspaceNotice(
+          'Uploaded the current Lean code and attached PDF to the verified database. Open the entry there to inspect the split view.',
+          'success',
+        );
+        return;
+      }
+
+      const normalizedTitle = activeProjectSlug && preparedProjectTarget
+        ? preparedProjectTarget.title
+        : currentTitle.trim() || DEFAULT_DOCUMENT.title;
+      const response = await syncLeanPlaygroundToWorkspace({
+        code: currentCode,
+        title: normalizedTitle,
+        proof_workspace_id: activeProofWorkspaceId,
+        project_root: activeProjectRoot,
+        project_file_path: savedWorkspacePath,
+      });
+
+      setWorkspaceInfo(response);
+      if (!activeProjectSlug) {
+        setSavedWorkspacePath(response.saved_path);
+        setSavedWorkspaceModule(response.saved_module);
+      }
+      setActiveProofWorkspaceId(response.proof_workspace_id ?? activeProofWorkspaceId);
+      setAttachedPdfFilename(response.pdf_filename ?? attachedPdfFilename ?? null);
+      setBaselineDocument((current) => ({
+        ...current,
+        code: currentCode,
+        title: normalizedTitle,
+        proofWorkspaceId: response.proof_workspace_id ?? current.proofWorkspaceId ?? null,
+        pdfFilename: response.pdf_filename ?? current.pdfFilename ?? null,
+        projectFilePath: activeProjectSlug
+          ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+          : current.projectFilePath,
+        projectModuleName: activeProjectSlug
+          ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
+          : current.projectModuleName,
+      }));
+      leanMonacoRef.current?.restart();
+      publishWorkspaceNotice(
+        response.pdf_filename
+          ? 'Updated the verified database entry and kept the linked PDF. The detail page will render both in split view.'
+          : 'Saved the current Lean code to the verified database.',
+        'success',
+      );
+    } catch (error: any) {
+      console.error('Failed to upload the Lean playground code to the verified database:', error);
+      if (error?.response?.status === 401) {
+        onLogout();
+        onOpenAuth();
+        publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
+      } else {
+        publishWorkspaceNotice(
+          error?.response?.data?.detail ?? error?.message ?? 'Failed to upload the current Lean code to the verified database.',
+          'error',
+        );
+      }
+    } finally {
+      setIsUploadingToDatabase(false);
+    }
+  };
+
+  const handleSaveProjectLink = async () => {
+    if (!activeProjectSlug) {
+      return;
+    }
+    if (!activeProjectCanEdit) {
+      publishWorkspaceNotice('This public project is read-only for you.', 'error');
+      return;
+    }
+
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+
+    setIsSavingProjectLink(true);
+    setWorkspaceNotice('');
+
+    try {
+      const project = await updateProject(activeProjectSlug, {
+        title: activeProjectTitle,
+        github_url: projectGithubUrlDraft.trim() || null,
+        visibility: activeProjectVisibility,
+      });
+      setActiveProjectTitle(project.title);
+      setActiveProjectGithubUrl(project.github_url);
+      setActiveProjectVisibility(project.visibility);
+      setActiveProjectCanEdit(project.can_edit);
+      setProjectGithubUrlDraft(project.github_url ?? '');
+      setBaselineDocument((current) => ({
+        ...current,
+        projectTitle: project.title,
+        projectGithubUrl: project.github_url,
+        projectVisibility: project.visibility,
+        projectCanEdit: project.can_edit,
+      }));
+      publishWorkspaceNotice(
+        project.github_url
+          ? 'Saved the project GitHub link.'
+          : 'Removed the project GitHub link.',
+        'success',
+      );
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        onLogout();
+        onOpenAuth();
+        publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
+      } else {
+        publishWorkspaceNotice(
+          error?.response?.data?.detail ?? 'Failed to save the project GitHub link.',
+          'error',
+        );
+      }
+    } finally {
+      setIsSavingProjectLink(false);
+    }
+  };
+
+  const handleOpenRepository = () => {
+    if (!activeProjectGithubUrl || typeof window === 'undefined') {
+      return;
+    }
+
+    window.open(activeProjectGithubUrl, '_blank', 'noopener,noreferrer');
   };
 
   const lineCount = Math.max(currentCode.split('\n').length, 1);
@@ -1224,6 +1639,18 @@ export function LeanPlayground({
   const attachedPdfDownloadUrl = pendingPdfPreviewUrl;
   const visiblePdfName = pendingPdfFile?.name ?? null;
   const isProjectMode = Boolean(activeProjectSlug);
+  const savedPdfPreviewUrl =
+    !pendingPdfFile && activeProofWorkspaceId && attachedPdfFilename
+      ? getProofWorkspacePdfUrl(activeProofWorkspaceId)
+      : null;
+  const savedPdfDownloadUrl =
+    !pendingPdfFile && activeProofWorkspaceId && attachedPdfFilename
+      ? getProofWorkspacePdfUrl(activeProofWorkspaceId, true)
+      : null;
+  const isWorkspaceBusy = isUploadingToDatabase;
+  const canEditProject = Boolean(activeProjectSlug && activeProjectCanEdit);
+  const saveActionLabel = 'Save to Verified DB';
+  const saveActionBusyLabel = 'Saving...';
 
   return (
     <section className="playground-screen">
@@ -1250,13 +1677,26 @@ export function LeanPlayground({
 
       <div className="playground-stage">
         <div className={`glass-panel playground-shell ${!isAuxiliaryUiVisible ? 'is-compact' : ''}`}>
+          <VerifiedModulePreviewCard
+            detail={previewModuleDetail}
+            error={previewModuleError}
+            isLoading={Boolean(previewModulePath && openingProjectModulePath === previewModulePath)}
+            modulePath={previewModulePath}
+            onClose={() => {
+              setPreviewModuleDetail(null);
+              setPreviewModuleError('');
+              setPreviewModulePath(null);
+            }}
+          />
           {isAuxiliaryUiVisible && (
             <div className="playground-shell-header">
               <div>
                 <div className="formal-editor-title">{currentTitle}</div>
                 <div className="formal-editor-subtitle">
-                  {documentSource === 'project'
-                    ? 'Loaded from your Lean project workspace'
+                  {isProjectMode
+                    ? canEditProject
+                      ? 'Using your Lean project context'
+                      : 'Using a public Lean project context'
                     : documentSource === 'workspace'
                     ? 'Loaded from your proof workspace'
                     : documentSource === 'shared'
@@ -1315,7 +1755,92 @@ export function LeanPlayground({
             </div>
           )}
 
-          <div className={`playground-columns ${!isAuxiliaryUiVisible ? 'is-compact' : ''}`}>
+          {isAuxiliaryUiVisible &&
+            !pendingPdfFile &&
+            attachedPdfFilename &&
+            savedPdfPreviewUrl &&
+            savedPdfDownloadUrl && (
+              <div className="playground-pdf-banner">
+                <div className="playground-pdf-banner-info">
+                  <div className="playground-pdf-banner-label">
+                    <FileText size={16} />
+                    <span>{attachedPdfFilename}</span>
+                  </div>
+                  <span className="proof-badge">Saved in Verified DB</span>
+                </div>
+                <div className="playground-pdf-banner-actions">
+                  <a
+                    className="button-secondary"
+                    href={savedPdfPreviewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink size={16} />
+                    Open PDF
+                  </a>
+                  <a
+                    className="button-secondary"
+                    href={savedPdfDownloadUrl}
+                    download={attachedPdfFilename}
+                  >
+                    <Download size={16} />
+                    Download
+                  </a>
+                </div>
+              </div>
+            )}
+
+          <div
+            className={`playground-columns ${!isAuxiliaryUiVisible ? 'is-compact' : ''} ${isProjectMode ? 'has-project-explorer' : ''}`}
+          >
+            {isProjectMode && (
+              <aside className="playground-module-panel">
+                <div className="playground-module-panel-header">
+                  <div className="proof-section-heading">
+                    <FileText size={16} color="var(--secondary-accent)" />
+                    <span>Project Modules</span>
+                  </div>
+                  <div className="proof-helper-text">
+                    Browse the verified Lean modules inside the selected project.
+                  </div>
+                </div>
+                <div className="playground-module-list">
+                  {isLoadingProjectModules ? (
+                    <div className="theorem-empty-state">
+                      <LoaderCircle size={18} className="spin" />
+                      Loading modules...
+                    </div>
+                  ) : projectModules.length === 0 ? (
+                    <div className="theorem-empty-state">
+                      No verified Lean modules were found in this project yet.
+                    </div>
+                  ) : (
+                    projectModules.map((module) => {
+                      const isActive = module.path === savedWorkspacePath;
+                      const isOpening = module.path === openingProjectModulePath;
+                      return (
+                        <button
+                          key={module.path}
+                          type="button"
+                          className={`playground-module-item ${isActive ? 'is-active' : ''}`}
+                          onClick={() => void handleOpenProjectModule(module)}
+                          disabled={isOpening}
+                          style={{ paddingLeft: `${16 + module.depth * 14}px` }}
+                        >
+                          <div className="playground-module-item-title-row">
+                            <span className="playground-module-item-title">{module.title}</span>
+                            {module.is_entry && <span className="proof-badge">entry</span>}
+                            {isOpening && <LoaderCircle size={14} className="spin" />}
+                          </div>
+                          <div className="playground-module-item-meta">{module.path}</div>
+                          <div className="playground-module-item-meta">{module.module_name}</div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </aside>
+            )}
             <div className="playground-code-panel">
               <div ref={editorRef} className="playground-editor-host" />
             </div>
@@ -1349,37 +1874,109 @@ export function LeanPlayground({
               <aside className="playground-sidebar-panel">
                 <div className="playground-sidebar-section">
                   <label className="playground-toolbar-group playground-title-field">
+                    <span>Project</span>
+                    <select
+                      className="input-field"
+                      value={projectSelectionValue}
+                      onChange={handleProjectSelectionChange}
+                      disabled={!currentUser || isLoadingProjects}
+                    >
+                      <option value="">
+                        {currentUser
+                          ? isLoadingProjects
+                            ? 'Loading projects...'
+                            : 'No project'
+                          : 'Sign in to select a project'}
+                      </option>
+                      {selectableProjects.map((project) => (
+                        <option
+                          key={`${project.owner_slug}:${project.slug}`}
+                          value={`${project.owner_slug}:${project.slug}`}
+                        >
+                          {project.title} ({project.visibility})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="proof-infoview-detail">
+                    Projects here are used as Lean import context and verified DB grouping only.
+                  </div>
+                </div>
+
+                <div className="playground-sidebar-section">
+                  <label className="playground-toolbar-group playground-title-field">
                     <span>{isProjectMode ? 'File' : 'Document'}</span>
                     <input
-                      className="input-field"
+                      className="input-field playground-file-name-input"
                       value={currentTitle}
                       onChange={(event) => setCurrentTitle(event.target.value)}
+                      onBlur={() => {
+                        if (activeProjectSlug) {
+                          commitProjectFileName();
+                        }
+                      }}
                       placeholder={isProjectMode ? 'Lean file name' : 'Lean document title'}
-                      readOnly={isProjectMode}
+                      title={currentTitle}
                     />
                   </label>
+                  <div className="playground-file-name-meta">
+                    {isProjectMode && (
+                      <div className="proof-infoview-detail">
+                        Lean file names are normalized into module-safe names inside the selected project.
+                      </div>
+                    )}
+                    <div className="proof-infoview-detail">Resolved workspace file</div>
+                    <div className="playground-inline-scroll-code" title={savedWorkspacePath}>
+                      {savedWorkspacePath}
+                    </div>
+                    <div className="proof-infoview-detail">Resolved module name</div>
+                    <div className="playground-inline-scroll-code" title={savedWorkspaceModule}>
+                      {savedWorkspaceModule}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="playground-sidebar-section">
+                  <div className="proof-infoview-card playground-save-card">
+                    <div className="proof-infoview-label">Save</div>
+                    <div className="proof-infoview-detail">
+                      {isProjectMode
+                        ? 'Projects group Lean files. Saving here publishes the current Lean code to the verified database under the active project.'
+                        : 'Save the current Lean code to the verified database. If a PDF is attached, the verified detail view will show both side by side.'}
+                    </div>
+                    <div className="playground-toolbar-actions" style={{ marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={handleUploadToVerifiedDatabase}
+                        disabled={isWorkspaceBusy}
+                      >
+                        {isWorkspaceBusy ? (
+                          <LoaderCircle size={16} className="spin" />
+                        ) : (
+                          <FileText size={16} />
+                        )}
+                        {isWorkspaceBusy ? saveActionBusyLabel : saveActionLabel}
+                      </button>
+                    </div>
+                    {pendingPdfFile && (
+                      <div className="proof-infoview-detail" style={{ marginTop: '4px' }}>
+                        The attached PDF will be stored together with this Lean code in the verified
+                        database.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="playground-toolbar-actions playground-sidebar-actions">
-                  <button
-                    type="button"
-                    className="button-primary"
-                    onClick={handlePushGithub}
-                    disabled={workspaceAction !== 'idle'}
-                  >
-                    {isProjectMode ? <Check size={16} /> : <Github size={16} />}
-                    {workspaceAction === 'pushing' ? 'Saving...' : isProjectMode ? 'Save' : 'Save / Push'}
-                  </button>
                   <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
                     <FileUp size={16} />
                     Upload Code
                   </button>
-                  {!isProjectMode && (
-                    <button type="button" className="button-secondary" onClick={handleSelectPdfUpload}>
-                      <FileUp size={16} />
-                      Upload PDF
-                    </button>
-                  )}
+                  <button type="button" className="button-secondary" onClick={handleSelectPdfUpload}>
+                    <FileUp size={16} />
+                    {pendingPdfFile ? 'Replace PDF' : 'Upload PDF'}
+                  </button>
                   <button type="button" className="button-secondary" onClick={handleRestartLean}>
                     <ExternalLink size={16} />
                     Restart Lean
@@ -1392,10 +1989,10 @@ export function LeanPlayground({
                     {shareState === 'copied' ? <Check size={16} /> : <Copy size={16} />}
                     {shareState === 'copied' ? 'Link Copied' : 'Share URL'}
                   </button>
-                  {githubRepositoryUrl && !isProjectMode && (
+                  {isProjectMode && activeProjectGithubUrl && (
                     <button type="button" className="button-secondary" onClick={handleOpenRepository}>
                       <ExternalLink size={16} />
-                      Repository
+                      Open Link
                     </button>
                   )}
                 </div>
@@ -1420,9 +2017,52 @@ export function LeanPlayground({
                       <div className="proof-infoview-detail">
                         {activeProjectTitle || activeProjectSlug}
                       </div>
+                      <div className="proof-infoview-detail">
+                        Owner `{activeProjectOwnerSlug}` · Visibility `{activeProjectVisibility}`
+                      </div>
                       <div className="proof-infoview-detail">{activeProjectRoot}</div>
                       <div className="proof-infoview-detail">
                         Package `{activeProjectPackageName}` · Entry `{activeProjectEntryModuleName}`
+                      </div>
+                      {!canEditProject && (
+                        <div className="proof-infoview-detail" style={{ marginTop: '8px', color: '#ffcf8b' }}>
+                          This public project is open read-only. Save to `Verified DB` if you want to keep your own copy of the current code.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {isProjectMode && canEditProject && (
+                    <div className="proof-infoview-card">
+                      <div className="proof-infoview-label">GitHub Link</div>
+                      <div className="proof-infoview-detail">
+                        This project keeps its own repository link. Saving the link does not push code.
+                      </div>
+                      <label className="playground-toolbar-group playground-title-field" style={{ marginTop: '12px' }}>
+                        <span>Repository URL</span>
+                        <input
+                          className="input-field"
+                          value={projectGithubUrlDraft}
+                          onChange={(event) => setProjectGithubUrlDraft(event.target.value)}
+                          placeholder="https://github.com/owner/repository"
+                          maxLength={1024}
+                        />
+                      </label>
+                      <div className="playground-toolbar-actions" style={{ marginTop: '12px' }}>
+                        <button
+                          type="button"
+                          className="button-primary"
+                          onClick={handleSaveProjectLink}
+                          disabled={isSavingProjectLink}
+                        >
+                          {isSavingProjectLink ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}
+                          {isSavingProjectLink ? 'Saving Link...' : 'Save Link'}
+                        </button>
+                        {activeProjectGithubUrl && (
+                          <button type="button" className="button-secondary" onClick={handleOpenRepository}>
+                            <ExternalLink size={16} />
+                            Open Link
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1454,11 +2094,48 @@ export function LeanPlayground({
                         title={`${currentTitle} PDF preview`}
                       />
                       <div className="proof-infoview-detail">
-                        This PDF is attached only in the playground right now. Use Save / Push to
-                        store it together with the current Lean code in the verified database.
+                        This PDF is attached only in the playground right now. Use Save to Verified DB
+                        to store it together with the current Lean code, then inspect both in split view
+                        from the verified database.
                       </div>
                     </div>
                   )}
+                  {!pendingPdfFile &&
+                    attachedPdfFilename &&
+                    savedPdfPreviewUrl &&
+                    savedPdfDownloadUrl && (
+                      <div className="proof-infoview-card playground-pdf-card">
+                        <div className="proof-infoview-label">Saved PDF</div>
+                        <div className="playground-pdf-actions">
+                          <a
+                            className="button-secondary"
+                            href={savedPdfPreviewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink size={16} />
+                            Open PDF
+                          </a>
+                          <a
+                            className="button-secondary"
+                            href={savedPdfDownloadUrl}
+                            download={attachedPdfFilename}
+                          >
+                            <Download size={16} />
+                            Download PDF
+                          </a>
+                        </div>
+                        <iframe
+                          className="playground-pdf-frame"
+                          src={savedPdfPreviewUrl}
+                          title={`${currentTitle} PDF preview`}
+                        />
+                        <div className="proof-infoview-detail">
+                          This PDF is already linked to the verified database entry for the current code.
+                          Opening that entry will show the Lean code and PDF side by side.
+                        </div>
+                      </div>
+                    )}
                   <div className="proof-infoview-card">
                     <div className="proof-infoview-label">Copilot Focus</div>
                     <div className="proof-infoview-detail">
@@ -1470,7 +2147,7 @@ export function LeanPlayground({
                     <div className="proof-infoview-detail">
                       {isProjectMode
                         ? 'Project files keep the `import <Package>.Main` convention and build inside the selected project root.'
-                        : 'Save or push from the playground, then import any module below from the shared Lean project.'}
+                        : 'Save from the playground, then import any module below from the shared Lean workspace.'}
                     </div>
                     {isProjectMode ? (
                       <div className="playground-import-list">
@@ -1503,20 +2180,6 @@ export function LeanPlayground({
                       The Lean server runs in the dedicated Docker service on port 8080.
                     </div>
                   </div>
-                  {workspaceInfo?.repository_url && (
-                    <div className="proof-infoview-card">
-                      <div className="proof-infoview-label">Repository</div>
-                      <div className="proof-infoview-detail">
-                        Branch `{workspaceInfo.repository_branch}` is configured through `.env`. Push
-                        from the playground to keep the repository and local Lean workspace aligned.
-                      </div>
-                      {!workspaceInfo.can_push && (
-                        <div className="proof-infoview-detail" style={{ marginTop: '8px', color: '#ffcf8b' }}>
-                          Set `GITHUB_ACCESS_TOKEN` in `.env` to enable remote GitHub writes.
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               </aside>
             )}

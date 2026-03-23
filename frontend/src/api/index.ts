@@ -8,6 +8,47 @@ export interface AuthUser {
   created_at: string;
 }
 
+export interface AdminStats {
+  total_users: number;
+  admin_users: number;
+  total_projects: number;
+  public_projects: number;
+  private_projects: number;
+  verified_documents: number;
+  proof_workspaces: number;
+  pdf_workspaces: number;
+}
+
+export interface AdminUserSummary {
+  id: number;
+  full_name: string;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+  project_count: number;
+  verified_document_count: number;
+  proof_workspace_count: number;
+  pdf_workspace_count: number;
+  can_toggle_admin: boolean;
+}
+
+export interface AdminProjectSummary {
+  title: string;
+  slug: string;
+  owner_slug: string;
+  project_root: string;
+  package_name: string;
+  entry_module_name: string;
+  github_url: string | null;
+  visibility: 'public' | 'private';
+}
+
+export interface AdminOverview {
+  stats: AdminStats;
+  users: AdminUserSummary[];
+  projects: AdminProjectSummary[];
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: 'bearer';
@@ -102,6 +143,10 @@ export interface IndexedProofSummary {
   proof_workspace_id: number | null;
   has_pdf: boolean;
   pdf_filename: string | null;
+  project_root: string | null;
+  project_slug: string | null;
+  project_title: string | null;
+  project_owner_slug: string | null;
 }
 
 export interface IndexedProofDetail extends IndexedProofSummary {
@@ -142,6 +187,10 @@ export interface ProjectSummary {
   package_name: string;
   entry_file_path: string;
   entry_module_name: string;
+  github_url: string | null;
+  visibility: 'public' | 'private';
+  can_edit: boolean;
+  can_delete: boolean;
 }
 
 export interface ProjectOpenResponse extends ProjectSummary {
@@ -149,6 +198,27 @@ export interface ProjectOpenResponse extends ProjectSummary {
   workspace_file_path: string;
   workspace_module_name: string;
   content: string;
+}
+
+export interface ProjectParticipant {
+  owner_slug: string;
+  display_name: string;
+  role: string;
+}
+
+export interface ProjectDetail extends ProjectSummary {
+  readme_path: string;
+  readme_content: string;
+  participants: ProjectParticipant[];
+}
+
+export interface ProjectModule {
+  document_id: number;
+  path: string;
+  module_name: string;
+  title: string;
+  depth: number;
+  is_entry: boolean;
 }
 
 export interface LeanImportGraphNode {
@@ -160,6 +230,10 @@ export interface LeanImportGraphNode {
   title: string;
   imports: number;
   source_kind: string;
+  project_root: string | null;
+  project_slug: string | null;
+  project_title: string | null;
+  owner_slug: string | null;
 }
 
 export interface LeanImportGraphLink {
@@ -257,6 +331,11 @@ export const getCurrentUser = async () => {
   return response.data;
 };
 
+export const updateCurrentUser = async (payload: { full_name: string }) => {
+  const response = await api.put<AuthUser>('/auth/me', payload);
+  return response.data;
+};
+
 export const listProofWorkspaces = async () => {
   const response = await api.get<ProofWorkspaceSummary[]>('/proofs/');
   return response.data;
@@ -281,6 +360,8 @@ export const uploadProofPdf = async (
   options?: {
     workspace_id?: number | null;
     lean4_code?: string | null;
+    project_root?: string | null;
+    project_file_path?: string | null;
   },
 ) => {
   const formData = new FormData();
@@ -291,6 +372,12 @@ export const uploadProofPdf = async (
   }
   if (options?.lean4_code) {
     formData.append('lean4_code', options.lean4_code);
+  }
+  if (options?.project_root) {
+    formData.append('project_root', options.project_root);
+  }
+  if (options?.project_file_path) {
+    formData.append('project_file_path', options.project_file_path);
   }
   const response = await api.post<ProofWorkspace>('/proofs/upload-pdf', formData);
   return response.data;
@@ -317,6 +404,19 @@ export const regenerateProofWorkspace = async (workspaceId: number) => {
 
 export const getTheorems = async () => {
   const response = await api.get<IndexedProofSummary[]>('/theorems/');
+  return response.data;
+};
+
+export const findTheoremByProjectModule = async (
+  projectRoot: string,
+  projectFilePath: string,
+) => {
+  const response = await api.get<IndexedProofSummary>('/theorems/lookup/project-module', {
+    params: {
+      project_root: projectRoot,
+      project_file_path: projectFilePath,
+    },
+  });
   return response.data;
 };
 
@@ -351,6 +451,20 @@ export const getLeanImportGraph = async () => {
   return response.data;
 };
 
+export const getAdminOverview = async () => {
+  const response = await api.get<AdminOverview>('/admin/overview');
+  return response.data;
+};
+
+export const updateAdminUser = async (userId: number, payload: { is_admin: boolean }) => {
+  const response = await api.put<AdminUserSummary>(`/admin/users/${userId}`, payload);
+  return response.data;
+};
+
+export const deleteAdminUser = async (userId: number) => {
+  await api.delete(`/admin/users/${userId}`);
+};
+
 export const getLeanWorkspaceInfo = async () => {
   const response = await api.get<LeanWorkspaceInfo>('/lean-workspace/');
   return response.data;
@@ -364,17 +478,65 @@ export const listProjects = async () => {
 export const createProject = async (payload: {
   title: string;
   slug?: string;
+  github_url?: string | null;
+  visibility?: 'public' | 'private';
 }) => {
   const response = await api.post<ProjectOpenResponse>('/projects/', payload);
   return response.data;
 };
 
+export const updateProject = async (
+  projectSlug: string,
+  payload: {
+    title?: string | null;
+    github_url?: string | null;
+    visibility?: 'public' | 'private';
+    readme_content?: string | null;
+  },
+) => {
+  const response = await api.put<ProjectDetail>(`/projects/${encodeURIComponent(projectSlug)}`, payload);
+  return response.data;
+};
+
+export const deleteProject = async (projectSlug: string, ownerSlug?: string | null) => {
+  await api.delete(`/projects/${encodeURIComponent(projectSlug)}`, {
+    params: ownerSlug ? { owner_slug: ownerSlug } : undefined,
+  });
+};
+
 export const openProject = async (
   projectSlug: string,
   filePath?: string | null,
+  ownerSlug?: string | null,
 ) => {
   const response = await api.get<ProjectOpenResponse>(`/projects/${encodeURIComponent(projectSlug)}/open`, {
-    params: filePath ? { file_path: filePath } : undefined,
+    params:
+      filePath || ownerSlug
+        ? {
+            ...(filePath ? { file_path: filePath } : {}),
+            ...(ownerSlug ? { owner_slug: ownerSlug } : {}),
+          }
+        : undefined,
+  });
+  return response.data;
+};
+
+export const getProjectDetail = async (
+  projectSlug: string,
+  ownerSlug?: string | null,
+) => {
+  const response = await api.get<ProjectDetail>(`/projects/${encodeURIComponent(projectSlug)}`, {
+    params: ownerSlug ? { owner_slug: ownerSlug } : undefined,
+  });
+  return response.data;
+};
+
+export const listProjectModules = async (
+  projectSlug: string,
+  ownerSlug?: string | null,
+) => {
+  const response = await api.get<ProjectModule[]>(`/projects/${encodeURIComponent(projectSlug)}/modules`, {
+    params: ownerSlug ? { owner_slug: ownerSlug } : undefined,
   });
   return response.data;
 };
@@ -392,40 +554,15 @@ export const createProjectFile = async (
   return response.data;
 };
 
-export const saveProjectFile = async (
-  projectSlug: string,
-  payload: {
-    path: string;
-    content: string;
-  },
-) => {
-  const response = await api.put<ProjectOpenResponse>(
-    `/projects/${encodeURIComponent(projectSlug)}/files`,
-    payload,
-  );
-  return response.data;
-};
-
 export const syncLeanPlaygroundToWorkspace = async (payload: {
   code: string;
   title: string;
   proof_workspace_id?: number | null;
+  project_root?: string | null;
+  project_file_path?: string | null;
 }) => {
   const response = await api.post<LeanWorkspaceSyncResponse>(
     '/lean-workspace/sync-playground',
-    payload,
-  );
-  return response.data;
-};
-
-export const pushLeanPlaygroundToGithub = async (payload: {
-  code: string;
-  title: string;
-  proof_workspace_id?: number | null;
-  commit_message?: string;
-}) => {
-  const response = await api.post<LeanWorkspaceSyncResponse>(
-    '/lean-workspace/push-playground',
     payload,
   );
   return response.data;

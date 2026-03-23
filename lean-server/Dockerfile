@@ -5,11 +5,15 @@ ENV ELAN_HOME=/root/.elan \
     PORT=8080
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates git xz-utils \
+    && apt-get install -y --no-install-recommends curl ca-certificates git xz-utils zstd \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
-    | sh -s -- -y --default-toolchain leanprover/lean4:v4.28.0
+    | sh -s -- -y --default-toolchain leanprover/lean4:v4.28.0 \
+    && elan toolchain install leanprover/lean4:v4.28.0 \
+    && elan default leanprover/lean4:v4.28.0 \
+    && lean --version \
+    && lake --version
 
 WORKDIR /app
 
@@ -21,4 +25,4 @@ RUN mkdir -p /workspace/lean-workspace
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "cd \"${LEAN_PROJECT_PATH:-/workspace/lean-workspace}\" && lake build && cd /app && npm start"]
+CMD ["npm", "start"]

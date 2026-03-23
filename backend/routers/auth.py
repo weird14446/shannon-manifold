@@ -47,6 +47,10 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 
+class UserUpdateRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=255)
+
+
 def _verify_google_identity_token(credential: str) -> tuple[str, str, str]:
     settings = get_settings()
     if not settings.google_client_id:
@@ -178,4 +182,26 @@ def login_with_google(
 
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.put("/me", response_model=UserResponse)
+def update_me(
+    payload: UserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    next_full_name = payload.full_name.strip()
+    if len(next_full_name) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Full name must be at least 2 characters long.",
+        )
+
+    if current_user.full_name == next_full_name:
+        return current_user
+
+    current_user.full_name = next_full_name
+    db.commit()
+    db.refresh(current_user)
     return current_user

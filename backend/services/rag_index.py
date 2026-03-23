@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -17,6 +18,12 @@ from models.code_chunk import CodeChunk
 from models.code_document import CodeDocument
 from models.proof_workspace import ProofWorkspace
 from services.lean_workspace import delete_workspace_file, resolve_workspace_target, write_workspace_file
+from services.project_workspace import (
+    canonicalize_project_root,
+    module_name_from_project_path,
+    project_scope_from_workspace_path,
+    title_from_slug,
+)
 
 TOP_LEVEL_DECLARATION_RE = re.compile(
     r"^\s*(theorem|lemma|def|structure|inductive|class|abbrev|instance)\s+([A-Za-z0-9_'.]+)"
@@ -44,6 +51,118 @@ def extract_imports_from_content(content: str) -> list[str]:
             if cleaned:
                 imports.append(cleaned)
     return imports
+
+
+def build_project_metadata(
+    project_root: str | None,
+    project_file_path: str | None = None,
+) -> dict[str, Any]:
+    if not project_root:
+        return {}
+
+    project_scope = project_scope_from_workspace_path(project_root)
+    project_title = (
+        title_from_slug(project_scope["project_slug"])
+        if project_scope is not None
+        else title_from_slug(project_root.rsplit("/", 1)[-1])
+    )
+    metadata = {
+        "project_root": project_root,
+        "project_title": project_title,
+        "project_slug": project_scope["project_slug"] if project_scope is not None else None,
+        "owner_slug": project_scope["owner_slug"] if project_scope is not None else None,
+    }
+    if project_file_path:
+        normalized_project_file_path = Path(project_file_path).as_posix().lstrip("/")
+        metadata["project_file_path"] = normalized_project_file_path
+        metadata["project_module_name"] = module_name_from_project_path(normalized_project_file_path)
+    return metadata
+
+
+def _parse_document_metadata(document: CodeDocument) -> dict[str, Any]:
+    try:
+        parsed_metadata = json.loads(document.metadata_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed_metadata if isinstance(parsed_metadata, dict) else {}
+
+
+def _project_file_path_from_verified_document(
+    document: CodeDocument,
+    *,
+    project_root: str,
+    package_name: str,
+) -> str | None:
+    metadata = _parse_document_metadata(document)
+    if metadata.get("project_root") != project_root:
+        return None
+
+    project_file_path = metadata.get("project_file_path")
+    if isinstance(project_file_path, str) and project_file_path.strip():
+        return Path(project_file_path).as_posix().lstrip("/")
+
+    module_name = str(metadata.get("project_module_name") or document.module_name or "").strip()
+    if not module_name:
+        return None
+
+    if module_name == package_name:
+        return f"{package_name}.lean"
+    if not module_name.startswith(f"{package_name}."):
+        return None
+    return f"{module_name.replace('.', '/')}.lean"
+
+
+def list_verified_project_modules(
+    db: Session,
+    *,
+    project_root: str,
+    package_name: str,
+    entry_file_path: str | None = None,
+) -> list[dict[str, str | int | bool]]:
+    normalized_project_root = canonicalize_project_root(project_root)
+    normalized_entry_path = Path(entry_file_path).as_posix().lstrip("/") if entry_file_path else None
+    candidate_documents = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.is_verified.is_(True),
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind.in_(("proof_workspace", "playground")),
+            CodeDocument.metadata_json.contains(normalized_project_root),
+        )
+        .order_by(CodeDocument.updated_at.desc(), CodeDocument.id.desc())
+        .all()
+    )
+
+    modules_by_path: dict[str, dict[str, str | int | bool]] = {}
+    for document in candidate_documents:
+        project_file_path = _project_file_path_from_verified_document(
+            document,
+            project_root=normalized_project_root,
+            package_name=package_name,
+        )
+        if not project_file_path or not project_file_path.endswith(".lean"):
+            continue
+        if project_file_path in modules_by_path:
+            continue
+
+        relative_parts = Path(project_file_path).parts
+        modules_by_path[project_file_path] = {
+            "document_id": document.id,
+            "path": project_file_path,
+            "module_name": module_name_from_project_path(project_file_path),
+            "title": Path(project_file_path).stem or title_from_slug(project_file_path),
+            "depth": max(len(relative_parts) - 1, 0),
+            "is_entry": project_file_path == normalized_entry_path,
+        }
+
+    modules = list(modules_by_path.values())
+    modules.sort(
+        key=lambda module: (
+            0 if bool(module["is_entry"]) else 1,
+            str(module["path"]).lower(),
+        )
+    )
+    return modules
 
 
 def _chunk_lean_document(
@@ -296,7 +415,9 @@ async def upsert_indexed_document(
     content: str,
     summary_text: str = "",
     is_verified: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> CodeDocument:
+    existing_metadata: dict[str, Any] = {}
     if document is None:
         query = db.query(CodeDocument).filter(
             CodeDocument.source_kind == source_kind,
@@ -308,6 +429,13 @@ async def upsert_indexed_document(
             query = query.filter(CodeDocument.path == path)
 
         document = query.first()
+    if document is not None:
+        try:
+            parsed_metadata = json.loads(document.metadata_json or "{}")
+            if isinstance(parsed_metadata, dict):
+                existing_metadata = parsed_metadata
+        except (TypeError, ValueError):
+            existing_metadata = {}
 
     if document is None:
         document = CodeDocument(
@@ -326,11 +454,12 @@ async def upsert_indexed_document(
     document.content = content
     document.sha256 = _hash_text(content)
     document.is_verified = is_verified
-    document.metadata_json = json.dumps(
-        {
-            "imports": extract_imports_from_content(content),
-        }
-    )
+    metadata_payload = {
+        **existing_metadata,
+        **(metadata or {}),
+        "imports": extract_imports_from_content(content),
+    }
+    document.metadata_json = json.dumps(metadata_payload)
     db.flush()
 
     if previous_path and previous_path != path and owner_id is not None:
@@ -372,6 +501,72 @@ def delete_indexed_document(
     db.delete(document)
     db.flush()
     _delete_qdrant_points(settings, vector_ids)
+
+
+def detach_project_metadata_from_documents(
+    db: Session,
+    *,
+    project_root: str,
+) -> int:
+    normalized_project_root = canonicalize_project_root(project_root)
+    candidate_documents = (
+        db.query(CodeDocument)
+        .filter(CodeDocument.metadata_json.contains(normalized_project_root))
+        .all()
+    )
+    updated_count = 0
+
+    for document in candidate_documents:
+        try:
+            metadata = json.loads(document.metadata_json or "{}")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(metadata, dict):
+            continue
+        if metadata.get("project_root") != normalized_project_root:
+            continue
+
+        metadata.pop("project_root", None)
+        metadata.pop("project_slug", None)
+        metadata.pop("project_title", None)
+        metadata.pop("owner_slug", None)
+        document.metadata_json = json.dumps(metadata)
+        updated_count += 1
+
+    if updated_count:
+        db.flush()
+    return updated_count
+
+
+def delete_project_index_documents(
+    db: Session,
+    *,
+    settings: Settings,
+    project_root: str,
+) -> int:
+    normalized_project_root = canonicalize_project_root(project_root)
+    project_documents = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.source_kind == "project",
+            CodeDocument.path.like(f"{normalized_project_root}/%"),
+        )
+        .all()
+    )
+
+    for document in project_documents:
+        delete_indexed_document(
+            db,
+            settings=settings,
+            document=document,
+            remove_workspace_file=False,
+        )
+
+    detach_project_metadata_from_documents(
+        db,
+        project_root=normalized_project_root,
+    )
+    return len(project_documents)
 
 
 def _dedupe_playground_documents_for_workspace(
@@ -490,6 +685,8 @@ async def sync_proof_workspace_to_rag(
     saved_path: str,
     saved_module: str,
     document: CodeDocument | None = None,
+    project_root: str | None = None,
+    project_file_path: str | None = None,
 ) -> CodeDocument:
     summary_source = workspace.extracted_text or workspace.source_text or ""
     summary_text = summary_source[:3000]
@@ -507,6 +704,7 @@ async def sync_proof_workspace_to_rag(
         content=workspace.lean4_code,
         summary_text=summary_text,
         is_verified=True,
+        metadata=build_project_metadata(project_root, project_file_path),
     )
     _dedupe_playground_documents_for_workspace(
         db,
@@ -529,6 +727,8 @@ async def sync_playground_document_to_rag(
     saved_module: str,
     content: str,
     document: CodeDocument | None = None,
+    project_root: str | None = None,
+    project_file_path: str | None = None,
 ) -> CodeDocument:
     return await upsert_indexed_document(
         db,
@@ -544,6 +744,7 @@ async def sync_playground_document_to_rag(
         content=content,
         summary_text=title,
         is_verified=True,
+        metadata=build_project_metadata(project_root, project_file_path),
     )
 
 
@@ -610,6 +811,30 @@ async def sync_existing_proof_documents(db: Session, settings: Settings) -> None
             saved_module=saved_module,
             document=document,
         )
+
+
+def cleanup_project_documents(
+    db: Session,
+    *,
+    settings: Settings,
+) -> int:
+    project_documents = (
+        db.query(CodeDocument)
+        .filter(CodeDocument.source_kind == "project")
+        .all()
+    )
+
+    removed_count = 0
+    for document in project_documents:
+        delete_indexed_document(
+            db,
+            settings=settings,
+            document=document,
+            remove_workspace_file=False,
+        )
+        removed_count += 1
+
+    return removed_count
 
 
 def _lexical_score(query_tokens: list[str], chunk: CodeChunk, document: CodeDocument) -> float:
@@ -720,7 +945,6 @@ def build_import_graph(
     *,
     owner_id: int | None,
 ) -> dict[str, list[dict[str, Any]]]:
-    _ = owner_id
     query = db.query(CodeDocument).filter(
         CodeDocument.language == "Lean4",
         CodeDocument.is_verified.is_(True),
@@ -732,33 +956,66 @@ def build_import_graph(
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
     module_index: dict[str, CodeDocument] = {}
+    module_identity_by_id: dict[int, tuple[str, str | None, dict[str, Any]]] = {}
 
     for document in documents:
-        module_name = document.module_name or document.title
+        metadata = _parse_document_metadata(document)
+        project_module_name = metadata.get("project_module_name")
+        project_file_path = metadata.get("project_file_path")
+        module_name = (
+            str(project_module_name).strip()
+            if isinstance(project_module_name, str) and str(project_module_name).strip()
+            else module_name_from_project_path(project_file_path)
+            if isinstance(project_file_path, str) and project_file_path.strip()
+            else (document.module_name or document.title)
+        )
         existing = module_index.get(module_name)
         if existing is not None and existing.owner_id is None and document.owner_id is not None:
             module_index[module_name] = document
         elif existing is None:
             module_index[module_name] = document
+        effective_path: str | None = document.path
+        project_root = metadata.get("project_root")
+        if (
+            isinstance(project_root, str)
+            and project_root.strip()
+            and isinstance(project_file_path, str)
+            and project_file_path.strip()
+        ):
+            effective_path = f"{project_root.rstrip('/')}/{Path(project_file_path).as_posix().lstrip('/')}"
+        module_identity_by_id[document.id] = (module_name, effective_path, metadata)
 
     for module_name, document in module_index.items():
-        metadata = json.loads(document.metadata_json or "{}")
+        _, effective_path, metadata = module_identity_by_id[document.id]
         imports = metadata.get("imports", [])
+        project_scope = project_scope_from_workspace_path(effective_path)
         nodes.append(
             {
                 "id": module_name,
                 "document_id": document.id,
                 "label": module_name.split(".")[-1],
                 "module_name": module_name,
-                "path": document.path,
+                "path": effective_path,
                 "title": document.title,
                 "imports": len(imports),
                 "source_kind": document.source_kind,
+                "project_root": metadata.get("project_root")
+                or (project_scope["project_root"] if project_scope is not None else None),
+                "project_slug": metadata.get("project_slug")
+                or (project_scope["project_slug"] if project_scope is not None else None),
+                "project_title": metadata.get("project_title")
+                or (
+                    title_from_slug(project_scope["project_slug"])
+                    if project_scope is not None
+                    else None
+                ),
+                "owner_slug": metadata.get("owner_slug")
+                or (project_scope["owner_slug"] if project_scope is not None else None),
             }
         )
 
     for module_name, document in module_index.items():
-        metadata = json.loads(document.metadata_json or "{}")
+        _, _, metadata = module_identity_by_id[document.id]
         for imported_module in metadata.get("imports", []):
             target = module_index.get(imported_module)
             if target is None:

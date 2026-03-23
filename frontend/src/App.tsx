@@ -11,21 +11,28 @@ import {
   type AuthUser,
   type ProjectOpenResponse,
 } from './api';
+import { AdminPage } from './components/Admin/AdminPage';
 import { AuthPanel } from './components/Auth/AuthPanel';
 import { Chatbot } from './components/Chatbot/Chatbot';
 import { RecoverableErrorBoundary } from './components/ErrorBoundary/RecoverableErrorBoundary';
-import { AgentGraph } from './components/AgentGraph/AgentGraph';
+import { MyPage } from './components/MyPage/MyPage';
+import { AgentGraph, type GraphProjectFilterOption } from './components/AgentGraph/AgentGraph';
 import { ProjectPanel } from './components/ProjectPanel/ProjectPanel';
-import { TheoremExplorer } from './components/TheoremList/TheoremExplorer';
+import { TheoremExplorer, type TheoremProjectFilterOption } from './components/TheoremList/TheoremExplorer';
 import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
 
-type AppView = 'dashboard' | 'playground' | 'code';
+type AppView = 'dashboard' | 'projects' | 'playground' | 'code' | 'admin' | 'my';
 const CHAT_POPOVER_MIN_WIDTH = 360;
 const CHAT_POPOVER_MIN_HEIGHT = 420;
 
 interface ChatPopoverSize {
   width: number;
   height: number;
+}
+
+interface DashboardProjectFilterOption {
+  value: string;
+  label: string;
 }
 
 interface PlaygroundSeed {
@@ -35,9 +42,13 @@ interface PlaygroundSeed {
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
   projectSlug?: string | null;
+  projectOwnerSlug?: string | null;
   projectTitle?: string | null;
   projectRoot?: string | null;
   packageName?: string | null;
+  projectGithubUrl?: string | null;
+  projectVisibility?: 'public' | 'private' | null;
+  projectCanEdit?: boolean | null;
   projectFilePath?: string | null;
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
@@ -50,7 +61,7 @@ const getInitialView = (): AppView => {
   }
 
   const view = new URLSearchParams(window.location.search).get('view');
-  if (view === 'playground' || view === 'code') {
+  if (view === 'projects' || view === 'playground' || view === 'code' || view === 'admin' || view === 'my') {
     return view;
   }
 
@@ -86,12 +97,14 @@ const getInitialPlaygroundSeed = (): PlaygroundSeed | null => {
     return null;
   }
 
+  const projectOwnerSlug = params.get('projectOwner')?.trim() || null;
   const projectFilePath = params.get('projectFile')?.trim() || null;
   return {
     code: '',
     revision: Date.now(),
     title: projectFilePath?.split('/').pop()?.replace(/\.lean$/i, '') || projectSlug,
     projectSlug,
+    projectOwnerSlug,
     projectFilePath,
   };
 };
@@ -120,8 +133,10 @@ function App() {
   );
   const [playgroundLoaderVersion, setPlaygroundLoaderVersion] = useState(0);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isProjectPanelOpen, setIsProjectPanelOpen] = useState(false);
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
+  const [dashboardProjectFilter, setDashboardProjectFilter] = useState('all');
+  const [theoremProjectOptions, setTheoremProjectOptions] = useState<TheoremProjectFilterOption[]>([]);
+  const [graphProjectOptions, setGraphProjectOptions] = useState<GraphProjectFilterOption[]>([]);
   const [playgroundChatContext, setPlaygroundChatContext] = useState<ChatCodeContextPayload | null>(
     null,
   );
@@ -145,6 +160,28 @@ function App() {
       }),
     [playgroundLoaderVersion],
   );
+
+  const dashboardProjectOptions = useMemo<DashboardProjectFilterOption[]>(() => {
+    const optionMap = new Map<string, DashboardProjectFilterOption>();
+    for (const option of [...theoremProjectOptions, ...graphProjectOptions]) {
+      if (!optionMap.has(option.value)) {
+        optionMap.set(option.value, {
+          value: option.value,
+          label: option.label,
+        });
+      }
+    }
+    return [...optionMap.values()].sort((left, right) => left.label.localeCompare(right.label));
+  }, [graphProjectOptions, theoremProjectOptions]);
+
+  useEffect(() => {
+    if (dashboardProjectFilter === 'all' || dashboardProjectFilter === 'shared') {
+      return;
+    }
+    if (!dashboardProjectOptions.some((option) => option.value === dashboardProjectFilter)) {
+      setDashboardProjectFilter('all');
+    }
+  }, [dashboardProjectFilter, dashboardProjectOptions]);
 
   useEffect(() => {
     let isMounted = true;
@@ -189,6 +226,11 @@ function App() {
 
     if (currentView === 'playground' && playgroundSeed?.projectSlug) {
       url.searchParams.set('project', playgroundSeed.projectSlug);
+      if (playgroundSeed.projectOwnerSlug) {
+        url.searchParams.set('projectOwner', playgroundSeed.projectOwnerSlug);
+      } else {
+        url.searchParams.delete('projectOwner');
+      }
       if (playgroundSeed.projectFilePath) {
         url.searchParams.set('projectFile', playgroundSeed.projectFilePath);
       } else {
@@ -200,11 +242,13 @@ function App() {
       url.searchParams.set('leanCode', encodeLeanShareCode(playgroundSeed.code));
       url.searchParams.set('leanTitle', playgroundSeed.title);
       url.searchParams.delete('project');
+      url.searchParams.delete('projectOwner');
       url.searchParams.delete('projectFile');
     } else {
       url.searchParams.delete('leanCode');
       url.searchParams.delete('leanTitle');
       url.searchParams.delete('project');
+      url.searchParams.delete('projectOwner');
       url.searchParams.delete('projectFile');
     }
 
@@ -227,6 +271,16 @@ function App() {
   const handleLogout = () => {
     setAuthToken(null);
     setCurrentUser(null);
+    if (currentView === 'admin' || currentView === 'my') {
+      setCurrentView('dashboard');
+    }
+  };
+
+  const handleUserUpdated = (user: AuthUser) => {
+    setCurrentUser(user);
+    if (currentView === 'admin' && !user.is_admin) {
+      setCurrentView('my');
+    }
   };
 
   const openLeanPlayground = (seed?: {
@@ -235,9 +289,13 @@ function App() {
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
     projectSlug?: string | null;
+    projectOwnerSlug?: string | null;
     projectTitle?: string | null;
     projectRoot?: string | null;
     packageName?: string | null;
+    projectGithubUrl?: string | null;
+    projectVisibility?: 'public' | 'private' | null;
+    projectCanEdit?: boolean | null;
     projectFilePath?: string | null;
     projectModuleName?: string | null;
     projectEntryFilePath?: string | null;
@@ -251,9 +309,13 @@ function App() {
         proofWorkspaceId: seed.proofWorkspaceId ?? null,
         pdfFilename: seed.pdfFilename ?? null,
         projectSlug: seed.projectSlug ?? null,
+        projectOwnerSlug: seed.projectOwnerSlug ?? null,
         projectTitle: seed.projectTitle ?? null,
         projectRoot: seed.projectRoot ?? null,
         packageName: seed.packageName ?? null,
+        projectGithubUrl: seed.projectGithubUrl ?? null,
+        projectVisibility: seed.projectVisibility ?? null,
+        projectCanEdit: seed.projectCanEdit ?? null,
         projectFilePath: seed.projectFilePath ?? null,
         projectModuleName: seed.projectModuleName ?? null,
         projectEntryFilePath: seed.projectEntryFilePath ?? null,
@@ -283,21 +345,18 @@ function App() {
     });
   };
 
-  const handlePlaygroundPushSuccess = () => {
-    if (playgroundSeed?.projectSlug) {
-      return;
-    }
-    setCurrentView('dashboard');
-  };
-
   const handleOpenProject = (project: ProjectOpenResponse) => {
     openLeanPlayground({
       code: project.content,
       title: project.workspace_title,
       projectSlug: project.slug,
+      projectOwnerSlug: project.owner_slug,
       projectTitle: project.title,
       projectRoot: project.project_root,
       packageName: project.package_name,
+      projectGithubUrl: project.github_url,
+      projectVisibility: project.visibility,
+      projectCanEdit: project.can_edit,
       projectFilePath: project.workspace_file_path,
       projectModuleName: project.workspace_module_name,
       projectEntryFilePath: project.entry_file_path,
@@ -391,9 +450,17 @@ function App() {
           <h1>Shannon Manifold</h1>
         </button>
         <div className="header-actions">
+          {currentUser?.is_admin && (
+            <button
+              className={`nav-pill ${currentView === 'admin' ? 'is-active' : ''}`}
+              onClick={() => setCurrentView('admin')}
+            >
+              Admin
+            </button>
+          )}
           <button
-            className={`nav-pill ${currentView === 'playground' && playgroundSeed?.projectSlug ? 'is-active' : ''}`}
-            onClick={() => setIsProjectPanelOpen(true)}
+            className={`nav-pill ${currentView === 'projects' ? 'is-active' : ''}`}
+            onClick={() => setCurrentView('projects')}
           >
             Projects
           </button>
@@ -403,7 +470,7 @@ function App() {
           >
             Lean Playground
           </button>
-          {(currentView === 'playground' || currentView === 'code') && (
+          {currentView !== 'dashboard' && (
             <button className="button-secondary" onClick={() => setCurrentView('dashboard')}>
               <ArrowLeft size={16} />
               Main Page
@@ -411,7 +478,11 @@ function App() {
           )}
           {currentUser ? (
             <>
-              <div className="user-chip">
+              <button
+                type="button"
+                className={`user-chip user-chip-button ${currentView === 'my' ? 'is-active' : ''}`}
+                onClick={() => setCurrentView('my')}
+              >
                 <ShieldCheck size={16} color="var(--secondary-accent)" />
                 <div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
@@ -422,7 +493,7 @@ function App() {
                     {currentUser.email}
                   </div>
                 </div>
-              </div>
+              </button>
               <button className="button-secondary" onClick={handleLogout}>
                 <LogOut size={16} />
                 Logout
@@ -438,78 +509,133 @@ function App() {
 
       <main className="main-content" style={{ height: 'calc(100vh - 72px)' }}>
         {currentView === 'dashboard' ? (
-          <section className="dashboard-columns">
-            <aside className="glass-panel dashboard-database-panel">
-              <TheoremExplorer
-                currentUser={currentUser}
-                onOpenProof={openVerifiedCode}
-              />
-            </aside>
+          <section className="dashboard-screen">
+            <div className="glass-panel dashboard-filter-bar">
+              <div className="dashboard-filter-copy">
+                <div className="dashboard-filter-title">Unified Project Filter</div>
+                <div className="dashboard-filter-subtitle">
+                  The selected project scope applies to both Verified Database and Lean Import Manifold.
+                </div>
+              </div>
+              <label className="dashboard-filter-control">
+                <span>Project Scope</span>
+                <select
+                  className="input-field dashboard-filter-select"
+                  value={dashboardProjectFilter}
+                  onChange={(event) => setDashboardProjectFilter(event.target.value)}
+                >
+                  <option value="all">All Projects</option>
+                  <option value="shared">Shared / No Project</option>
+                  {dashboardProjectOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-            <section className="dashboard-main-panel">
-              <div
-                className="glass-panel"
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
+            <section className="dashboard-columns">
+              <aside className="glass-panel dashboard-database-panel">
+                <TheoremExplorer
+                  currentUser={currentUser}
+                  onOpenProof={openVerifiedCode}
+                  projectFilter={dashboardProjectFilter}
+                  onProjectFilterChange={setDashboardProjectFilter}
+                  onProjectOptionsChange={setTheoremProjectOptions}
+                  hideProjectFilter
+                />
+              </aside>
+
+              <section className="dashboard-main-panel">
                 <div
+                  className="glass-panel"
                   style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    zIndex: 10,
-                    padding: '20px',
-                    pointerEvents: 'none',
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    overflow: 'hidden',
                   }}
                 >
                   <div
                     style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: '16px',
-                      width: '100%',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      zIndex: 10,
+                      padding: '20px',
+                      pointerEvents: 'none',
                     }}
                   >
-                    <div>
-                      <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                        Lean Import Manifold
-                      </h2>
-                      <p
-                        style={{
-                          color: 'rgba(255,255,255,0.7)',
-                          fontSize: '0.9rem',
-                          marginTop: '4px',
-                          textShadow: '0 1px 2px rgba(0,0,0,0.5)',
-                        }}
-                      >
-                        Visualized import relationships across verified user-uploaded Lean
-                        modules. Refresh when you want a new snapshot.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      style={{ pointerEvents: 'auto' }}
-                      onClick={() => setGraphRefreshKey((current) => current + 1)}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        width: '100%',
+                      }}
                     >
-                      <RefreshCw size={16} />
-                      Refresh
-                    </button>
+                      <div>
+                        <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+                          Lean Import Manifold
+                        </h2>
+                        <p
+                          style={{
+                            color: 'rgba(255,255,255,0.7)',
+                            fontSize: '0.9rem',
+                            marginTop: '4px',
+                            textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                          }}
+                        >
+                          Visualized import relationships across verified user-uploaded Lean
+                          modules. Refresh when you want a new snapshot.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        style={{ pointerEvents: 'auto' }}
+                        onClick={() => setGraphRefreshKey((current) => current + 1)}
+                      >
+                        <RefreshCw size={16} />
+                        Refresh
+                      </button>
+                    </div>
                   </div>
+                  <AgentGraph
+                    refreshKey={graphRefreshKey}
+                    onOpenProof={openVerifiedCode}
+                    projectFilter={dashboardProjectFilter}
+                    onProjectFilterChange={setDashboardProjectFilter}
+                    onProjectOptionsChange={setGraphProjectOptions}
+                    hideProjectFilter
+                  />
                 </div>
-                <AgentGraph
-                  refreshKey={graphRefreshKey}
-                  onOpenProof={openVerifiedCode}
-                />
-              </div>
+              </section>
             </section>
           </section>
+        ) : currentView === 'projects' ? (
+          <ProjectPanel
+            variant="page"
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+          />
+        ) : currentView === 'my' ? (
+          <MyPage
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onOpenProof={openVerifiedCode}
+            onOpenProject={handleOpenProject}
+            onUserUpdated={handleUserUpdated}
+          />
+        ) : currentView === 'admin' ? (
+          <AdminPage
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onUserUpdated={handleUserUpdated}
+          />
         ) : currentView === 'code' ? (
           selectedDocumentId ? (
             <VerifiedCodeViewer
@@ -538,7 +664,6 @@ function App() {
                   onLogout={handleLogout}
                   onDocumentChange={setPlaygroundChatContext}
                   onAttachmentChange={setPlaygroundChatAttachment}
-                  onPushSuccess={handlePlaygroundPushSuccess}
                 />
               </Suspense>
             </RecoverableErrorBoundary>
@@ -608,16 +733,6 @@ function App() {
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onAuthenticated={handleAuthenticated}
-      />
-      <ProjectPanel
-        isOpen={isProjectPanelOpen}
-        currentUser={currentUser}
-        onClose={() => setIsProjectPanelOpen(false)}
-        onOpenAuth={() => {
-          setIsProjectPanelOpen(false);
-          setIsAuthOpen(true);
-        }}
-        onOpenProject={handleOpenProject}
       />
     </div>
   );

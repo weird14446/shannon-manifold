@@ -1,5 +1,6 @@
 import base64
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field, ValidationError
@@ -15,7 +16,6 @@ from services.rag_index import retrieve_rag_context
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 settings = get_settings()
-MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 SUPPORTED_IMAGE_MIME_TYPES = {
     "image/png",
@@ -53,23 +53,34 @@ class ChatRequest(BaseModel):
     attachment_context: dict[str, str | int] | None = None
 
 
+async def _read_limited_upload(file: UploadFile, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"The attached file exceeds the {max_bytes // (1024 * 1024)}MB chat limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _extract_attachment_context(file: UploadFile | None) -> dict[str, str | int] | None:
     if file is None or not file.filename:
         return None
 
     suffix = Path(file.filename).suffix.lower()
     mime_type = (file.content_type or "").lower()
-    file_bytes = await file.read()
+    file_bytes = await _read_limited_upload(file, max_bytes=settings.chat_attachment_max_bytes)
     if not file_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The attached file is empty.",
-        )
-
-    if len(file_bytes) > MAX_CHAT_ATTACHMENT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="The attached file exceeds the 10MB chat limit.",
         )
 
     if suffix == ".pdf" or mime_type == "application/pdf":

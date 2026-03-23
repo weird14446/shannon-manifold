@@ -70,6 +70,12 @@ class Settings:
         self.proof_upload_dir = Path(
             os.getenv("PROOF_UPLOAD_DIR", "/app/storage/uploads")
         )
+        self.proof_upload_max_bytes = int(
+            os.getenv("PROOF_UPLOAD_MAX_BYTES", str(25 * 1024 * 1024))
+        )
+        self.chat_attachment_max_bytes = int(
+            os.getenv("CHAT_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024))
+        )
         self.proof_artifact_dir = Path(
             os.getenv("PROOF_ARTIFACT_DIR", "/app/storage/artifacts")
         )

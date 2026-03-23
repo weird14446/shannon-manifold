@@ -11,20 +11,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const leanProjectPath = process.env.LEAN_PROJECT_PATH || '/workspace/lean-workspace';
 const port = Number(process.env.PORT || '8080');
 const projectsRoot = path.join(leanProjectPath, 'projects');
+const cacheFetchTimeoutMs = Number(process.env.LEAN_CACHE_FETCH_TIMEOUT_MS || '120000');
 
 const app = express();
 app.use(express.json({ limit: '64kb' }));
 
 const runCommand = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
+    const { timeoutMs = null, ...spawnOptions } = options;
     const child = childProcess.spawn(command, args, {
       cwd: leanProjectPath,
       env: process.env,
-      ...options,
+      ...spawnOptions,
     });
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    let timeoutId = null;
 
     child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -32,8 +36,28 @@ const runCommand = (command, args, options = {}) =>
     child.stderr?.on('data', (chunk) => {
       stderr += chunk.toString();
     });
+    if (timeoutMs && timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, timeoutMs);
+    }
     child.on('error', reject);
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (timedOut) {
+        const error = new Error(
+          `Command timed out after ${timeoutMs}ms: ${command} ${args.join(' ')}`.trim(),
+        );
+        error.stdout = stdout;
+        error.stderr = stderr;
+        error.exitCode = code;
+        error.signal = signal;
+        reject(error);
+        return;
+      }
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
@@ -77,6 +101,7 @@ const detectLeanPath = async (workspaceRoot) => {
 
 const resolvedLeanPaths = new Map();
 const workspaceReadyPromises = new Map();
+const sharedWorkspaceRoot = path.resolve(leanProjectPath);
 
 const normalizeProjectRoot = (projectRoot) => {
   if (typeof projectRoot !== 'string' || projectRoot.trim() === '') {
@@ -121,6 +146,7 @@ const initializeWorkspace = async (workspaceRoot, label = 'shared Lean workspace
   try {
     const { stdout, stderr } = await runCommand('lake', ['exe', 'cache', 'get'], {
       cwd: workspaceRoot,
+      timeoutMs: cacheFetchTimeoutMs,
     });
     const cacheOutput = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     if (cacheOutput) {
@@ -158,7 +184,20 @@ const ensureWorkspaceReady = (projectRoot = null) => {
   return promise;
 };
 
-const startupReadyPromise = ensureWorkspaceReady();
+let startupStatus = 'initializing';
+let startupErrorMessage = null;
+
+const startupReadyPromise = ensureWorkspaceReady()
+  .then((result) => {
+    startupStatus = 'ok';
+    startupErrorMessage = null;
+    return result;
+  })
+  .catch((error) => {
+    startupStatus = 'failed';
+    startupErrorMessage = error instanceof Error ? error.message : String(error);
+    throw error;
+  });
 
 const normalizeWorkspacePath = (workspacePath) => {
   if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
@@ -224,18 +263,18 @@ app.get('/', (_request, response) => {
   });
 });
 
-app.get('/health', async (_request, response) => {
-  const ready = await startupReadyPromise.then(
-    () => true,
-    () => false,
-  );
-  response.json({
+app.get('/health', (_request, response) => {
+  const ready = startupStatus === 'ok';
+  const payload = {
     project: 'shannon-manifold-lean-server',
-    status: ready ? 'ok' : 'initializing',
+    status: ready ? 'ok' : startupStatus,
     leanProjectPath,
-    leanPathReady: Boolean(resolvedLeanPaths.get(leanProjectPath)),
+    leanPathReady: Boolean(resolvedLeanPaths.get(sharedWorkspaceRoot)),
     workspaceReady: ready,
-  });
+    error: ready ? null : startupErrorMessage,
+  };
+
+  response.status(ready ? 200 : 503).json(payload);
 });
 
 app.post('/build-module', async (request, response) => {

@@ -6,10 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import models  # noqa: F401
 from config import get_settings
 from database import Base, SessionLocal, engine
-from routers import auth, chat, lean_workspace, proofs, projects, theorems
+from routers import admin, auth, chat, lean_workspace, proofs, projects, theorems
 from services.admin_bootstrap import bootstrap_admin_user, ensure_user_auth_columns
 from services.project_workspace import backfill_existing_project_scaffolds
 from services.rag_index import (
+    cleanup_project_documents,
     cleanup_duplicate_verified_documents,
     cleanup_missing_workspace_documents,
     ensure_rag_collection,
@@ -42,6 +43,7 @@ async def lifespan(_: FastAPI):
             await sync_workspace_seed_documents(db, settings)
             cleanup_missing_workspace_documents(db, settings=settings)
             await sync_existing_proof_documents(db, settings)
+            cleanup_project_documents(db, settings=settings)
             cleanup_duplicate_verified_documents(db, settings=settings)
             db.commit()
         except Exception as exc:  # pragma: no cover - startup resilience
@@ -63,6 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(proofs.router)
 app.include_router(theorems.router)
 app.include_router(chat.router)

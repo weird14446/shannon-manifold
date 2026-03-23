@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from config import Settings
 from models.user import User
-from security import hash_password
+from security import hash_password, verify_password
 
 
 def ensure_user_auth_columns(engine: Engine) -> None:
@@ -63,6 +63,9 @@ def bootstrap_admin_user(db: Session, settings: Settings) -> None:
         updated = True
     if admin_user.full_name != settings.admin_full_name:
         admin_user.full_name = settings.admin_full_name
+        updated = True
+    if not verify_password(admin_password, admin_user.hashed_password):
+        admin_user.hashed_password = hash_password(admin_password)
         updated = True
 
     if updated:

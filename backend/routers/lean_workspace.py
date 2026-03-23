@@ -19,10 +19,9 @@ from services.lean_workspace import (
     push_workspace_file_to_github,
     write_workspace_file,
 )
+from services.project_workspace import validate_project_context_copy
 from services.rag_index import (
     build_import_graph,
-    cleanup_duplicate_verified_documents,
-    cleanup_missing_workspace_documents,
     sync_playground_document_to_rag,
     sync_proof_workspace_to_rag,
 )
@@ -51,6 +50,8 @@ class SyncPlaygroundRequest(BaseModel):
     code: str = Field(min_length=1)
     title: str = Field(min_length=1, max_length=255)
     proof_workspace_id: int | None = None
+    project_root: str | None = None
+    project_file_path: str | None = None
 
 
 class PushPlaygroundRequest(SyncPlaygroundRequest):
@@ -76,6 +77,10 @@ class LeanImportGraphNode(BaseModel):
     title: str
     imports: int
     source_kind: str
+    project_root: str | None = None
+    project_slug: str | None = None
+    project_title: str | None = None
+    owner_slug: str | None = None
 
 
 class LeanImportGraphLink(BaseModel):
@@ -99,11 +104,6 @@ def read_lean_import_graph(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> LeanImportGraphResponse:
-    cleaned = cleanup_missing_workspace_documents(db, settings=settings)
-    cleaned += cleanup_duplicate_verified_documents(db, settings=settings)
-    if cleaned:
-        db.commit()
-
     owner_id = current_user.id if current_user else None
     graph = build_import_graph(db, owner_id=owner_id)
     return LeanImportGraphResponse(**graph)
@@ -135,10 +135,26 @@ def sync_playground_file(
             module_name=saved_file["module"],
         )
     except LeanWorkspaceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        if payload.project_root and payload.project_file_path:
+            try:
+                asyncio.run(
+                    validate_project_context_copy(
+                        settings,
+                        project_root=payload.project_root,
+                        source_relative_path=payload.project_file_path,
+                        content=payload.code,
+                    )
+                )
+            except LeanWorkspaceError as project_exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(project_exc),
+                ) from project_exc
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
     workspace = None
     if payload.proof_workspace_id is not None:
         workspace = _get_backing_workspace(
@@ -159,6 +175,8 @@ def sync_playground_file(
                 workspace=workspace,
                 saved_path=saved_file["path"],
                 saved_module=saved_file["module"],
+                project_root=payload.project_root,
+                project_file_path=payload.project_file_path,
             )
         )
     else:
@@ -171,6 +189,8 @@ def sync_playground_file(
                 saved_path=saved_file["path"],
                 saved_module=saved_file["module"],
                 content=payload.code,
+                project_root=payload.project_root,
+                project_file_path=payload.project_file_path,
             )
         )
     db.commit()
@@ -221,10 +241,24 @@ async def push_playground_file(
             module_name=saved_file["module"],
         )
     except LeanWorkspaceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
+        if payload.project_root and payload.project_file_path:
+            try:
+                await validate_project_context_copy(
+                    settings,
+                    project_root=payload.project_root,
+                    source_relative_path=payload.project_file_path,
+                    content=payload.code,
+                )
+            except LeanWorkspaceError as project_exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(project_exc),
+                ) from project_exc
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
     workspace = None
     if payload.proof_workspace_id is not None:
         workspace = _get_backing_workspace(
@@ -244,6 +278,8 @@ async def push_playground_file(
             workspace=workspace,
             saved_path=saved_file["path"],
             saved_module=saved_file["module"],
+            project_root=payload.project_root,
+            project_file_path=payload.project_file_path,
         )
     else:
         await sync_playground_document_to_rag(
@@ -254,6 +290,8 @@ async def push_playground_file(
             saved_path=saved_file["path"],
             saved_module=saved_file["module"],
             content=payload.code,
+            project_root=payload.project_root,
+            project_file_path=payload.project_file_path,
         )
     db.commit()
 

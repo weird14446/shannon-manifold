@@ -19,6 +19,7 @@ from services.lean_workspace import (
     build_workspace_module_sync,
     write_workspace_file,
 )
+from services.project_workspace import validate_project_context_copy
 from services.proof_pipeline import build_formalization_bundle, extract_text_from_pdf
 from services.rag_index import sync_proof_workspace_to_rag
 
@@ -66,6 +67,38 @@ class ProofWorkspaceUpdateRequest(BaseModel):
     extracted_text: str = Field(default="")
     lean4_code: str = Field(default="")
     rocq_code: str = Field(default="")
+
+
+async def _store_uploaded_pdf(file: UploadFile, *, destination: Path) -> int:
+    total_bytes = 0
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > settings.proof_upload_max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=(
+                            "The uploaded PDF exceeds the "
+                            f"{settings.proof_upload_max_bytes // (1024 * 1024)}MB limit."
+                        ),
+                    )
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+    if total_bytes == 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded PDF is empty.",
+        )
+
+    return total_bytes
 
 
 @router.get("/", response_model=list[ProofWorkspaceSummaryResponse])
@@ -184,6 +217,8 @@ async def upload_pdf_workspace(
     title: str = Form(default=""),
     workspace_id: int | None = Form(default=None),
     lean4_code: str = Form(default=""),
+    project_root: str | None = Form(default=None),
+    project_file_path: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -198,19 +233,21 @@ async def upload_pdf_workspace(
     safe_name = f"{uuid4()}.pdf"
     upload_path = settings.proof_upload_dir / safe_name
     upload_path.parent.mkdir(parents=True, exist_ok=True)
-
-    content = await file.read()
-    upload_path.write_bytes(content)
-    await file.close()
+    try:
+        await _store_uploaded_pdf(file, destination=upload_path)
+    finally:
+        await file.close()
 
     try:
         extracted_text = extract_text_from_pdf(upload_path)
     except Exception as exc:  # pragma: no cover - defensive handling for parser failures
+        _safe_delete_uploaded_pdf(str(upload_path))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Failed to parse the uploaded PDF: {exc}",
         ) from exc
     if not extracted_text:
+        _safe_delete_uploaded_pdf(str(upload_path))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="The uploaded PDF did not contain extractable text.",
@@ -267,13 +304,20 @@ async def upload_pdf_workspace(
         code=workspace.lean4_code,
         title=workspace.title,
     )
-    await _build_saved_workspace_async_or_422(saved_file)
+    await _build_saved_workspace_async_or_422(
+        saved_file,
+        content=workspace.lean4_code,
+        project_root=project_root,
+        project_file_path=project_file_path,
+    )
     await sync_proof_workspace_to_rag(
         db,
         settings=settings,
         workspace=workspace,
         saved_path=saved_file["path"],
         saved_module=saved_file["module"],
+        project_root=project_root,
+        project_file_path=project_file_path,
     )
     db.commit()
     db.refresh(workspace)
@@ -394,7 +438,13 @@ def _safe_delete_uploaded_pdf(file_path: str | None) -> None:
         return
 
 
-def _build_saved_workspace_or_422(saved_file: dict[str, str]) -> None:
+def _build_saved_workspace_or_422(
+    saved_file: dict[str, str],
+    *,
+    content: str | None = None,
+    project_root: str | None = None,
+    project_file_path: str | None = None,
+) -> None:
     try:
         build_workspace_module_sync(
             settings,
@@ -402,13 +452,35 @@ def _build_saved_workspace_or_422(saved_file: dict[str, str]) -> None:
             module_name=saved_file["module"],
         )
     except LeanWorkspaceError as exc:
+        if project_root and project_file_path and content is not None:
+            try:
+                asyncio.run(
+                    validate_project_context_copy(
+                        settings,
+                        project_root=project_root,
+                        source_relative_path=project_file_path,
+                        content=content,
+                    )
+                )
+            except LeanWorkspaceError as project_exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(project_exc),
+                ) from project_exc
+            return
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
 
 
-async def _build_saved_workspace_async_or_422(saved_file: dict[str, str]) -> None:
+async def _build_saved_workspace_async_or_422(
+    saved_file: dict[str, str],
+    *,
+    content: str | None = None,
+    project_root: str | None = None,
+    project_file_path: str | None = None,
+) -> None:
     try:
         await build_workspace_module(
             settings,
@@ -416,6 +488,20 @@ async def _build_saved_workspace_async_or_422(saved_file: dict[str, str]) -> Non
             module_name=saved_file["module"],
         )
     except LeanWorkspaceError as exc:
+        if project_root and project_file_path and content is not None:
+            try:
+                await validate_project_context_copy(
+                    settings,
+                    project_root=project_root,
+                    source_relative_path=project_file_path,
+                    content=content,
+                )
+            except LeanWorkspaceError as project_exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(project_exc),
+                ) from project_exc
+            return
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),

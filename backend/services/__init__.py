@@ -10,6 +10,7 @@ from services.lean_workspace import (
 from services.proof_pipeline import build_formalization_bundle, extract_text_from_pdf
 from services.rag_index import (
     build_import_graph,
+    cleanup_project_documents,
     delete_indexed_document,
     ensure_rag_collection,
     extract_imports_from_content,
@@ -26,7 +27,7 @@ from services.project_workspace import (
     ensure_project_scaffold,
     ensure_user_project,
     get_user_project,
-    list_user_projects,
+    list_accessible_projects,
     module_name_from_project_path,
     owner_slug_for_user,
     package_name_for_project,
@@ -37,6 +38,7 @@ from services.project_workspace import (
 __all__ = [
     "build_import_graph",
     "build_formalization_bundle",
+    "cleanup_project_documents",
     "delete_indexed_document",
     "delete_workspace_file",
     "ensure_rag_collection",
@@ -47,7 +49,7 @@ __all__ = [
     "generate_chat_reply",
     "get_user_project",
     "get_workspace_info",
-    "list_user_projects",
+    "list_accessible_projects",
     "list_importable_modules",
     "module_name_from_project_path",
     "owner_slug_for_user",
