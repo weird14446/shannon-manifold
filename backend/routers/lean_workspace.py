@@ -22,9 +22,8 @@ from services.lean_workspace import (
 from services.project_workspace import validate_project_context_copy
 from services.rag_index import (
     build_import_graph,
-    sync_playground_document_to_rag,
-    sync_proof_workspace_to_rag,
 )
+from services.verified_build_jobs import enqueue_verified_build_job, get_verified_build_job
 
 router = APIRouter(prefix="/lean-workspace", tags=["lean-workspace"])
 settings = get_settings()
@@ -64,8 +63,23 @@ class SyncPlaygroundResponse(LeanWorkspaceInfoResponse):
     pushed: bool
     proof_workspace_id: int | None = None
     pdf_filename: str | None = None
+    build_job_id: str | None = None
+    build_status: str | None = None
+    build_error: str | None = None
     remote_content_url: str | None = None
     remote_commit_url: str | None = None
+
+
+class VerifiedBuildJobResponse(BaseModel):
+    job_id: str
+    status: str
+    error: str | None = None
+    saved_path: str
+    saved_module: str
+    proof_workspace_id: int | None = None
+    pdf_filename: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class LeanImportGraphNode(BaseModel):
@@ -105,12 +119,12 @@ def read_lean_import_graph(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> LeanImportGraphResponse:
     owner_id = current_user.id if current_user else None
-    graph = build_import_graph(db, owner_id=owner_id)
+    graph = build_import_graph(db, settings=settings, owner_id=owner_id)
     return LeanImportGraphResponse(**graph)
 
 
 @router.post("/sync-playground", response_model=SyncPlaygroundResponse)
-def sync_playground_file(
+async def sync_playground_file(
     payload: SyncPlaygroundRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -128,33 +142,6 @@ def sync_playground_file(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    try:
-        build_workspace_module_sync(
-            settings,
-            relative_workspace_path=saved_file["path"],
-            module_name=saved_file["module"],
-        )
-    except LeanWorkspaceError as exc:
-        if payload.project_root and payload.project_file_path:
-            try:
-                asyncio.run(
-                    validate_project_context_copy(
-                        settings,
-                        project_root=payload.project_root,
-                        source_relative_path=payload.project_file_path,
-                        content=payload.code,
-                    )
-                )
-            except LeanWorkspaceError as project_exc:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=str(project_exc),
-                ) from project_exc
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=str(exc),
-            ) from exc
     workspace = None
     if payload.proof_workspace_id is not None:
         workspace = _get_backing_workspace(
@@ -165,35 +152,23 @@ def sync_playground_file(
     if workspace is not None:
         workspace.title = payload.title
         workspace.lean4_code = payload.code
-        workspace.status = "edited"
+        workspace.status = "building"
         linked_workspace_id = workspace.id
         linked_pdf_filename = workspace.source_filename if workspace.pdf_path else None
-        asyncio.run(
-            sync_proof_workspace_to_rag(
-                db,
-                settings=settings,
-                workspace=workspace,
-                saved_path=saved_file["path"],
-                saved_module=saved_file["module"],
-                project_root=payload.project_root,
-                project_file_path=payload.project_file_path,
-            )
-        )
-    else:
-        asyncio.run(
-            sync_playground_document_to_rag(
-                db,
-                settings=settings,
-                owner_id=current_user.id,
-                title=payload.title,
-                saved_path=saved_file["path"],
-                saved_module=saved_file["module"],
-                content=payload.code,
-                project_root=payload.project_root,
-                project_file_path=payload.project_file_path,
-            )
-        )
     db.commit()
+    queued_job = enqueue_verified_build_job(
+        settings=settings,
+        owner_id=current_user.id,
+        saved_path=saved_file["path"],
+        saved_module=saved_file["module"],
+        title=payload.title,
+        code=payload.code,
+        proof_workspace_id=linked_workspace_id,
+        pdf_filename=linked_pdf_filename,
+        project_root=payload.project_root,
+        project_file_path=payload.project_file_path,
+        final_workspace_status="edited" if workspace is not None else None,
+    )
     return SyncPlaygroundResponse(
         **get_workspace_info(settings, payload.title),
         saved_path=saved_file["path"],
@@ -201,18 +176,32 @@ def sync_playground_file(
         pushed=False,
         proof_workspace_id=linked_workspace_id,
         pdf_filename=linked_pdf_filename,
+        build_job_id=str(queued_job["job_id"]),
+        build_status=str(queued_job["status"]),
+        build_error=queued_job["error"] if isinstance(queued_job["error"], str) else None,
     )
 
 
 @router.post("/save-playground", response_model=SyncPlaygroundResponse)
-def save_playground_file_legacy(
+async def save_playground_file_legacy(
     payload: SyncPlaygroundRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SyncPlaygroundResponse:
     # Backward-compatible alias for older frontend bundles still posting to
     # /lean-workspace/save-playground.
-    return sync_playground_file(payload, current_user=current_user, db=db)
+    return await sync_playground_file(payload, current_user=current_user, db=db)
+
+
+@router.get("/build-jobs/{job_id}", response_model=VerifiedBuildJobResponse)
+def read_verified_build_job(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+) -> VerifiedBuildJobResponse:
+    payload = get_verified_build_job(job_id, owner_id=current_user.id)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build job not found.")
+    return VerifiedBuildJobResponse(**payload)
 
 
 @router.post("/push-playground", response_model=SyncPlaygroundResponse)

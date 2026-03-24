@@ -86,6 +86,9 @@ export interface ProofWorkspaceSummary {
   status: string;
   created_at: string;
   updated_at: string;
+  build_job_id?: string | null;
+  build_status?: string | null;
+  build_error?: string | null;
 }
 
 export interface ProofWorkspace extends ProofWorkspaceSummary {
@@ -153,6 +156,22 @@ export interface IndexedProofDetail extends IndexedProofSummary {
   content: string;
 }
 
+export interface TheoremPdfMappingItem {
+  symbol_name: string;
+  declaration_kind: string;
+  start_line: number;
+  end_line: number;
+  pdf_page: number | null;
+  pdf_excerpt: string;
+  confidence: number | null;
+  reason: string | null;
+}
+
+export interface TheoremPdfMapping {
+  generated_at: string | null;
+  items: TheoremPdfMappingItem[];
+}
+
 export interface LeanWorkspaceModule {
   path: string;
   module: string;
@@ -175,8 +194,23 @@ export interface LeanWorkspaceSyncResponse extends LeanWorkspaceInfo {
   pushed: boolean;
   proof_workspace_id: number | null;
   pdf_filename: string | null;
+  build_job_id?: string | null;
+  build_status?: string | null;
+  build_error?: string | null;
   remote_content_url: string | null;
   remote_commit_url: string | null;
+}
+
+export interface VerifiedBuildJob {
+  job_id: string;
+  status: string;
+  error: string | null;
+  saved_path: string;
+  saved_module: string;
+  proof_workspace_id: number | null;
+  pdf_filename: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProjectSummary {
@@ -425,6 +459,11 @@ export const getTheoremDetail = async (theoremId: number) => {
   return response.data;
 };
 
+export const getTheoremPdfMapping = async (theoremId: number) => {
+  const response = await api.get<TheoremPdfMapping>(`/theorems/${theoremId}/pdf-mapping`);
+  return response.data;
+};
+
 export const getTheoremPdfUrl = (theoremId: number, download = false) =>
   `${API_BASE_URL}/theorems/${theoremId}/pdf${download ? '?download=true' : ''}`;
 
@@ -565,6 +604,11 @@ export const syncLeanPlaygroundToWorkspace = async (payload: {
     '/lean-workspace/sync-playground',
     payload,
   );
+  return response.data;
+};
+
+export const getVerifiedBuildJob = async (jobId: string) => {
+  const response = await api.get<VerifiedBuildJob>(`/lean-workspace/build-jobs/${encodeURIComponent(jobId)}`);
   return response.data;
 };
 

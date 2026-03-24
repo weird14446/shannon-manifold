@@ -13,6 +13,10 @@ class ChatProviderError(RuntimeError):
     pass
 
 
+class ChatProviderConfigurationError(ChatProviderError):
+    pass
+
+
 CODE_BLOCK_RE = re.compile(r"```(?P<lang>[A-Za-z0-9_+-]*)\n(?P<code>.*?)```", re.DOTALL)
 
 
@@ -216,6 +220,40 @@ def _extract_gemini_text(data: dict[str, Any]) -> str:
     raise ChatProviderError("Gemini returned an empty reply.")
 
 
+def _configuration_error_message(provider: str, reason: str) -> str:
+    if provider == "gemini":
+        return f"Chat provider is misconfigured: {reason} Gemini API key."
+    if provider == "openai_compatible":
+        return f"Chat provider is misconfigured: {reason} provider API key."
+    return f"Chat provider is misconfigured: {reason} API key."
+
+
+def _looks_like_invalid_gemini_key(detail: str) -> bool:
+    lowered = detail.lower()
+    return (
+        "api_key_invalid" in lowered
+        or "api key not valid" in lowered
+        or "invalid api key" in lowered
+        or "request is missing required authentication credential" in lowered
+    )
+
+
+def _looks_like_invalid_openai_key(detail: str) -> bool:
+    lowered = detail.lower()
+    return (
+        "incorrect api key" in lowered
+        or "invalid api key" in lowered
+        or "invalid authentication" in lowered
+        or "unauthorized" in lowered
+        or "authentication" in lowered and "failed" in lowered
+    )
+
+
+def _is_placeholder_api_key(api_key: str) -> bool:
+    lowered = api_key.strip().lower()
+    return lowered.startswith("your-") or "placeholder" in lowered
+
+
 def build_mock_chat_reply(
     *,
     message: str,
@@ -353,6 +391,10 @@ async def _generate_openai_compatible_reply(
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text.strip() or str(exc)
+            if exc.response.status_code in {401, 403} or _looks_like_invalid_openai_key(detail):
+                raise ChatProviderConfigurationError(
+                    _configuration_error_message("openai_compatible", "invalid")
+                ) from exc
             raise ChatProviderError(f"Chat provider rejected the request: {detail}") from exc
         except httpx.HTTPError as exc:
             raise ChatProviderError(f"Chat provider request failed: {exc}") from exc
@@ -430,6 +472,10 @@ async def _generate_gemini_reply(
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text.strip() or str(exc)
+            if exc.response.status_code in {400, 401, 403} and _looks_like_invalid_gemini_key(detail):
+                raise ChatProviderConfigurationError(
+                    _configuration_error_message("gemini", "invalid")
+                ) from exc
             raise ChatProviderError(f"Gemini rejected the request: {detail}") from exc
         except httpx.HTTPError as exc:
             raise ChatProviderError(f"Gemini request failed: {exc}") from exc
@@ -470,7 +516,9 @@ async def generate_chat_reply(
         )
 
     if not settings.chatbot_api_key:
-        raise ChatProviderError(f"CHATBOT_PROVIDER is set to {provider} but CHATBOT_API_KEY is missing.")
+        raise ChatProviderConfigurationError(_configuration_error_message(provider, "missing"))
+    if _is_placeholder_api_key(settings.chatbot_api_key):
+        raise ChatProviderConfigurationError(_configuration_error_message(provider, "invalid"))
 
     if provider == "openai_compatible":
         return await _generate_openai_compatible_reply(

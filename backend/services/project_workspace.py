@@ -482,6 +482,21 @@ def list_accessible_projects(
     return projects
 
 
+def accessible_project_roots(
+    settings: Settings,
+    *,
+    requester_user_id: int | None,
+) -> set[str]:
+    return {
+        str(project["project_root"])
+        for project in list_accessible_projects(
+            settings,
+            requester_user_id=requester_user_id,
+        )
+        if project.get("project_root")
+    }
+
+
 def ensure_user_project(
     settings: Settings,
     *,

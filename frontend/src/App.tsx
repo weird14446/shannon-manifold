@@ -339,6 +339,28 @@ function App() {
   };
 
   const handleApplyChatSuggestedCode = (payload: { code: string; title: string }) => {
+    if (currentView === 'playground' && playgroundSeed) {
+      openLeanPlayground({
+        code: payload.code,
+        title: payload.title,
+        proofWorkspaceId: playgroundSeed.proofWorkspaceId ?? null,
+        pdfFilename: playgroundSeed.pdfFilename ?? null,
+        projectSlug: playgroundSeed.projectSlug ?? null,
+        projectOwnerSlug: playgroundSeed.projectOwnerSlug ?? null,
+        projectTitle: playgroundSeed.projectTitle ?? null,
+        projectRoot: playgroundSeed.projectRoot ?? null,
+        packageName: playgroundSeed.packageName ?? null,
+        projectGithubUrl: playgroundSeed.projectGithubUrl ?? null,
+        projectVisibility: playgroundSeed.projectVisibility ?? null,
+        projectCanEdit: playgroundSeed.projectCanEdit ?? null,
+        projectFilePath: playgroundSeed.projectFilePath ?? null,
+        projectModuleName: playgroundSeed.projectModuleName ?? null,
+        projectEntryFilePath: playgroundSeed.projectEntryFilePath ?? null,
+        projectEntryModuleName: playgroundSeed.projectEntryModuleName ?? null,
+      });
+      return;
+    }
+
     openLeanPlayground({
       code: payload.code,
       title: payload.title,

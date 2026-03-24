@@ -11,7 +11,11 @@ from database import get_db
 from models.user import User
 from security import get_current_user
 from services.proof_pipeline import extract_text_from_pdf_bytes
-from services.chat_provider import ChatProviderError, generate_chat_reply
+from services.chat_provider import (
+    ChatProviderConfigurationError,
+    ChatProviderError,
+    generate_chat_reply,
+)
 from services.rag_index import retrieve_rag_context
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -271,6 +275,11 @@ async def chat_interaction(
             ),
             attachment_context=attachment_context,
         )
+    except ChatProviderConfigurationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except ChatProviderError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

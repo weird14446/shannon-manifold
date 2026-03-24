@@ -13,7 +13,12 @@ from models.proof_workspace import ProofWorkspace
 from models.user import User
 from security import get_current_user, get_current_user_optional
 from services.lean_workspace import LeanWorkspaceError, build_workspace_module, delete_workspace_file, write_workspace_file
-from services.project_workspace import canonicalize_project_root, module_name_from_project_path
+from services.pdf_mapping import get_or_generate_pdf_mapping
+from services.project_workspace import (
+    accessible_project_roots,
+    canonicalize_project_root,
+    module_name_from_project_path,
+)
 from services.rag_index import (
     delete_indexed_document,
     sync_playground_document_to_rag,
@@ -48,6 +53,22 @@ class TheoremSummaryResponse(BaseModel):
 
 class TheoremDetailResponse(TheoremSummaryResponse):
     content: str
+
+
+class TheoremPdfMappingItemResponse(BaseModel):
+    symbol_name: str
+    declaration_kind: str
+    start_line: int
+    end_line: int
+    pdf_page: int | None = None
+    pdf_excerpt: str
+    confidence: float | None = None
+    reason: str | None = None
+
+
+class TheoremPdfMappingResponse(BaseModel):
+    generated_at: str | None = None
+    items: list[TheoremPdfMappingItemResponse]
 
 
 class TheoremUpdateRequest(BaseModel):
@@ -136,6 +157,26 @@ def _build_summary(
     )
 
 
+def _document_metadata(document: CodeDocument) -> dict[str, object]:
+    try:
+        parsed_metadata = json.loads(document.metadata_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed_metadata if isinstance(parsed_metadata, dict) else {}
+
+
+def _document_is_visible(
+    document: CodeDocument,
+    *,
+    visible_project_roots: set[str],
+) -> bool:
+    metadata = _document_metadata(document)
+    project_root = metadata.get("project_root")
+    if not isinstance(project_root, str) or not project_root.strip():
+        return True
+    return project_root in visible_project_roots
+
+
 def _get_document_or_404(
     db: Session,
     *,
@@ -205,6 +246,10 @@ async def get_theorems(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[TheoremSummaryResponse]:
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
     documents = (
         db.query(CodeDocument)
         .filter(
@@ -215,6 +260,11 @@ async def get_theorems(
         .order_by(CodeDocument.updated_at.desc(), CodeDocument.id.desc())
         .all()
     )
+    documents = [
+        document
+        for document in documents
+        if _document_is_visible(document, visible_project_roots=visible_project_roots)
+    ]
     workspace_lookup = _build_workspace_lookup(db, documents)
     return [_build_summary(document, workspace_lookup, current_user) for document in documents]
 
@@ -227,6 +277,15 @@ async def get_theorem_for_project_module(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> TheoremSummaryResponse:
     normalized_project_root = canonicalize_project_root(project_root)
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
+    if normalized_project_root not in visible_project_roots:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No verified database entry exists for this project module yet.",
+        )
     normalized_project_file_path = _normalize_project_file_path(project_file_path)
     expected_module_name = module_name_from_project_path(normalized_project_file_path)
     expected_title = Path(normalized_project_file_path).stem
@@ -244,12 +303,7 @@ async def get_theorem_for_project_module(
 
     best_match: tuple[int, CodeDocument] | None = None
     for document in candidate_documents:
-        try:
-            metadata = json.loads(document.metadata_json or "{}")
-        except (TypeError, ValueError):
-            metadata = {}
-        if not isinstance(metadata, dict):
-            continue
+        metadata = _document_metadata(document)
         if metadata.get("project_root") != normalized_project_root:
             continue
 
@@ -285,6 +339,10 @@ async def get_theorem_detail(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> TheoremDetailResponse:
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
     document = (
         db.query(CodeDocument)
         .filter(
@@ -297,6 +355,8 @@ async def get_theorem_detail(
     )
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Indexed proof not found.")
+    if not _document_is_visible(document, visible_project_roots=visible_project_roots):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Indexed proof not found.")
 
     workspace_lookup = _build_workspace_lookup(db, [document])
     summary = _build_summary(document, workspace_lookup, current_user)
@@ -308,7 +368,12 @@ async def get_theorem_pdf(
     document_id: int,
     download: bool = Query(default=False),
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> FileResponse:
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
     document = (
         db.query(CodeDocument)
         .filter(
@@ -321,6 +386,8 @@ async def get_theorem_pdf(
         .first()
     )
     if document is None or document.source_ref_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not found for this code entry.")
+    if not _document_is_visible(document, visible_project_roots=visible_project_roots):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not found for this code entry.")
 
     workspace = (
@@ -343,6 +410,50 @@ async def get_theorem_pdf(
         filename=filename,
         headers={"Content-Disposition": f'{content_disposition}; filename="{filename}"'},
     )
+
+
+@router.get("/{document_id}/pdf-mapping", response_model=TheoremPdfMappingResponse)
+async def get_theorem_pdf_mapping(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> TheoremPdfMappingResponse:
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
+    document = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.id == document_id,
+            CodeDocument.is_verified.is_(True),
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind == "proof_workspace",
+            CodeDocument.source_ref_id.isnot(None),
+        )
+        .first()
+    )
+    if document is None or document.source_ref_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF mapping not found for this code entry.")
+    if not _document_is_visible(document, visible_project_roots=visible_project_roots):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF mapping not found for this code entry.")
+
+    workspace = (
+        db.query(ProofWorkspace)
+        .filter(ProofWorkspace.id == document.source_ref_id)
+        .first()
+    )
+    if workspace is None or not workspace.pdf_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF mapping not found for this code entry.")
+
+    mapping = await get_or_generate_pdf_mapping(
+        db,
+        settings=settings,
+        document=document,
+        workspace=workspace,
+    )
+    db.commit()
+    return TheoremPdfMappingResponse(**mapping)
 
 
 @router.put("/{document_id}", response_model=TheoremDetailResponse)

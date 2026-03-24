@@ -19,6 +19,7 @@ from models.code_document import CodeDocument
 from models.proof_workspace import ProofWorkspace
 from services.lean_workspace import delete_workspace_file, resolve_workspace_target, write_workspace_file
 from services.project_workspace import (
+    accessible_project_roots,
     canonicalize_project_root,
     module_name_from_project_path,
     project_scope_from_workspace_path,
@@ -943,8 +944,13 @@ async def retrieve_rag_context(
 def build_import_graph(
     db: Session,
     *,
+    settings: Settings,
     owner_id: int | None,
 ) -> dict[str, list[dict[str, Any]]]:
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=owner_id,
+    )
     query = db.query(CodeDocument).filter(
         CodeDocument.language == "Lean4",
         CodeDocument.is_verified.is_(True),
@@ -960,6 +966,13 @@ def build_import_graph(
 
     for document in documents:
         metadata = _parse_document_metadata(document)
+        project_root = metadata.get("project_root")
+        if (
+            isinstance(project_root, str)
+            and project_root.strip()
+            and project_root not in visible_project_roots
+        ):
+            continue
         project_module_name = metadata.get("project_module_name")
         project_file_path = metadata.get("project_file_path")
         module_name = (

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { LeanMonaco, LeanMonacoEditor, type LeanMonacoOptions } from 'lean4monaco';
 import {
+  getVerifiedBuildJob,
   getLeanWorkspaceInfo,
   getTheoremDetail,
   listProjectModules,
@@ -97,6 +98,15 @@ interface PlaygroundDocument {
 interface CursorSnapshot {
   line: number;
   column: number;
+}
+
+interface PendingVerifiedSaveSnapshot {
+  code: string;
+  title: string;
+  proofWorkspaceId: number | null;
+  pdfFilename: string | null;
+  projectFilePath: string | null;
+  projectModuleName: string | null;
 }
 
 const toEditorModelPath = (workspacePath: string) => `/${workspacePath.replace(/^\/+/, '')}`;
@@ -510,6 +520,9 @@ export function LeanPlayground({
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const [pendingPdfPreviewUrl, setPendingPdfPreviewUrl] = useState<string | null>(null);
   const [isUploadingToDatabase, setIsUploadingToDatabase] = useState(false);
+  const [activeBuildJobId, setActiveBuildJobId] = useState<string | null>(null);
+  const [activeBuildJobStatus, setActiveBuildJobStatus] = useState<string | null>(null);
+  const [pendingVerifiedSave, setPendingVerifiedSave] = useState<PendingVerifiedSaveSnapshot | null>(null);
   const editorModelPath = toEditorModelPath(savedWorkspacePath);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -749,6 +762,99 @@ export function LeanPlayground({
       isMounted = false;
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!activeBuildJobId || !currentUser || typeof window === 'undefined') {
+      return;
+    }
+
+    let cancelled = false;
+    let pollTimer: number | null = null;
+
+    const stopPolling = () => {
+      if (pollTimer !== null) {
+        window.clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    };
+
+    const pollJob = async () => {
+      try {
+        const job = await getVerifiedBuildJob(activeBuildJobId);
+        if (cancelled) {
+          return;
+        }
+
+        setActiveBuildJobStatus(job.status);
+        if (job.status === 'queued' || job.status === 'running') {
+          pollTimer = window.setTimeout(() => {
+            void pollJob();
+          }, 1500);
+          return;
+        }
+
+        setActiveBuildJobId(null);
+
+        if (job.status === 'succeeded') {
+          if (pendingVerifiedSave) {
+            setBaselineDocument((current) => ({
+              ...current,
+              code: pendingVerifiedSave.code,
+              title: pendingVerifiedSave.title,
+              proofWorkspaceId: pendingVerifiedSave.proofWorkspaceId,
+              pdfFilename: pendingVerifiedSave.pdfFilename,
+              projectFilePath: pendingVerifiedSave.projectFilePath,
+              projectModuleName: pendingVerifiedSave.projectModuleName,
+            }));
+          }
+          publishWorkspaceNotice(
+            job.pdf_filename ?? pendingVerifiedSave?.pdfFilename
+              ? 'Lean build finished and the verified database entry was updated with its linked PDF.'
+              : 'Lean build finished and the verified database entry was updated.',
+            'success',
+          );
+        } else {
+          publishWorkspaceNotice(
+            job.error ?? 'Lean build failed before the verified database entry could be updated.',
+            'error',
+          );
+        }
+
+        setPendingVerifiedSave(null);
+      } catch (error: any) {
+        if (cancelled) {
+          return;
+        }
+        if (error?.response?.status === 401) {
+          onLogout();
+          onOpenAuth();
+          publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
+          setActiveBuildJobId(null);
+          setPendingVerifiedSave(null);
+          return;
+        }
+        if (error?.response?.status === 404) {
+          publishWorkspaceNotice(
+            'The background build status could not be found anymore. Refresh later to confirm the verified database entry.',
+            'error',
+          );
+          setActiveBuildJobId(null);
+          setPendingVerifiedSave(null);
+          return;
+        }
+        pollTimer = window.setTimeout(() => {
+          void pollJob();
+        }, 2000);
+      }
+    };
+
+    void pollJob();
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [activeBuildJobId, currentUser, onLogout, onOpenAuth, pendingVerifiedSave]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1478,19 +1584,6 @@ export function LeanPlayground({
         replacePendingPdf(null);
         setAttachedPdfFilename(nextPdfFilename);
         setActiveProofWorkspaceId(workspace.id);
-        setBaselineDocument((current) => ({
-          ...current,
-          code: nextCode,
-          title: nextTitle,
-          proofWorkspaceId: workspace.id,
-          pdfFilename: nextPdfFilename,
-          projectFilePath: activeProjectSlug
-            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
-            : current.projectFilePath,
-          projectModuleName: activeProjectSlug
-            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
-            : current.projectModuleName,
-        }));
         if (!activeProjectSlug) {
           setCurrentTitle(nextTitle);
           setCurrentCode(nextCode);
@@ -1505,10 +1598,36 @@ export function LeanPlayground({
             }
           }
         }
-        publishWorkspaceNotice(
-          'Uploaded the current Lean code and attached PDF to the verified database. Open the entry there to inspect the split view.',
-          'success',
-        );
+        const queuedSnapshot: PendingVerifiedSaveSnapshot = {
+          code: nextCode,
+          title: nextTitle,
+          proofWorkspaceId: workspace.id,
+          pdfFilename: nextPdfFilename,
+          projectFilePath: activeProjectSlug
+            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+            : baselineDocument.projectFilePath ?? null,
+          projectModuleName: activeProjectSlug
+            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
+            : baselineDocument.projectModuleName ?? null,
+        };
+        if (workspace.build_job_id) {
+          setPendingVerifiedSave(queuedSnapshot);
+          setActiveBuildJobId(workspace.build_job_id);
+          setActiveBuildJobStatus(workspace.build_status ?? 'queued');
+          publishWorkspaceNotice(
+            'Uploaded the current Lean code and attached PDF. Lean build and verified database sync are running in the background.',
+            'success',
+          );
+        } else {
+          setBaselineDocument((current) => ({
+            ...current,
+            ...queuedSnapshot,
+          }));
+          publishWorkspaceNotice(
+            'Uploaded the current Lean code and attached PDF to the verified database. Open the entry there to inspect the split view.',
+            'success',
+          );
+        }
         return;
       }
 
@@ -1530,26 +1649,39 @@ export function LeanPlayground({
       }
       setActiveProofWorkspaceId(response.proof_workspace_id ?? activeProofWorkspaceId);
       setAttachedPdfFilename(response.pdf_filename ?? attachedPdfFilename ?? null);
-      setBaselineDocument((current) => ({
-        ...current,
+      leanMonacoRef.current?.restart();
+      const queuedSnapshot: PendingVerifiedSaveSnapshot = {
         code: currentCode,
         title: normalizedTitle,
-        proofWorkspaceId: response.proof_workspace_id ?? current.proofWorkspaceId ?? null,
-        pdfFilename: response.pdf_filename ?? current.pdfFilename ?? null,
+        proofWorkspaceId: response.proof_workspace_id ?? activeProofWorkspaceId ?? null,
+        pdfFilename: response.pdf_filename ?? attachedPdfFilename ?? null,
         projectFilePath: activeProjectSlug
           ? (preparedProjectTarget?.path ?? savedWorkspacePath)
-          : current.projectFilePath,
+          : baselineDocument.projectFilePath ?? null,
         projectModuleName: activeProjectSlug
           ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
-          : current.projectModuleName,
-      }));
-      leanMonacoRef.current?.restart();
-      publishWorkspaceNotice(
-        response.pdf_filename
-          ? 'Updated the verified database entry and kept the linked PDF. The detail page will render both in split view.'
-          : 'Saved the current Lean code to the verified database.',
-        'success',
-      );
+          : baselineDocument.projectModuleName ?? null,
+      };
+      if (response.build_job_id) {
+        setPendingVerifiedSave(queuedSnapshot);
+        setActiveBuildJobId(response.build_job_id);
+        setActiveBuildJobStatus(response.build_status ?? 'queued');
+        publishWorkspaceNotice(
+          'Saved the current Lean code locally. Lean build and verified database sync are running in the background.',
+          'success',
+        );
+      } else {
+        setBaselineDocument((current) => ({
+          ...current,
+          ...queuedSnapshot,
+        }));
+        publishWorkspaceNotice(
+          response.pdf_filename
+            ? 'Updated the verified database entry and kept the linked PDF. The detail page will render both in split view.'
+            : 'Saved the current Lean code to the verified database.',
+          'success',
+        );
+      }
     } catch (error: any) {
       console.error('Failed to upload the Lean playground code to the verified database:', error);
       if (error?.response?.status === 401) {
@@ -1647,10 +1779,15 @@ export function LeanPlayground({
     !pendingPdfFile && activeProofWorkspaceId && attachedPdfFilename
       ? getProofWorkspacePdfUrl(activeProofWorkspaceId, true)
       : null;
-  const isWorkspaceBusy = isUploadingToDatabase;
+  const isWorkspaceBusy = isUploadingToDatabase || Boolean(activeBuildJobId);
   const canEditProject = Boolean(activeProjectSlug && activeProjectCanEdit);
   const saveActionLabel = 'Save to Verified DB';
-  const saveActionBusyLabel = 'Saving...';
+  const saveActionBusyLabel =
+    activeBuildJobId && !isUploadingToDatabase
+      ? activeBuildJobStatus === 'running'
+        ? 'Building...'
+        : 'Queued...'
+      : 'Saving...';
 
   return (
     <section className="playground-screen">

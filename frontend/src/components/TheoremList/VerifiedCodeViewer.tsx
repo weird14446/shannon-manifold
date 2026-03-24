@@ -15,9 +15,11 @@ import {
 import {
   deleteTheorem,
   getTheoremDetail,
+  getTheoremPdfMapping,
   getTheoremPdfUrl,
   type AuthUser,
   type IndexedProofDetail,
+  type TheoremPdfMappingItem,
   updateTheorem,
 } from '../../api';
 import { LeanCodeHighlighter } from './LeanCodeHighlighter';
@@ -49,6 +51,10 @@ export function VerifiedCodeViewer({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [mappingItems, setMappingItems] = useState<TheoremPdfMappingItem[]>([]);
+  const [hoveredMappingItem, setHoveredMappingItem] = useState<TheoremPdfMappingItem | null>(null);
+  const [isLoadingMapping, setIsLoadingMapping] = useState(false);
+  const [mappingError, setMappingError] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -164,6 +170,46 @@ export function VerifiedCodeViewer({
   const pdfPreviewUrl = detail?.has_pdf ? getTheoremPdfUrl(detail.id) : null;
   const pdfDownloadUrl = detail?.has_pdf ? getTheoremPdfUrl(detail.id, true) : null;
   const hasPdfPreview = Boolean(detail?.has_pdf && pdfPreviewUrl && pdfDownloadUrl);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!detail?.has_pdf) {
+      setMappingItems([]);
+      setHoveredMappingItem(null);
+      setMappingError('');
+      setIsLoadingMapping(false);
+      return;
+    }
+
+    const loadMapping = async () => {
+      setIsLoadingMapping(true);
+      setMappingError('');
+      try {
+        const response = await getTheoremPdfMapping(detail.id);
+        if (isMounted) {
+          setMappingItems(response.items);
+        }
+      } catch (loadError: any) {
+        if (isMounted) {
+          setMappingItems([]);
+          setMappingError(
+            loadError?.response?.data?.detail ?? 'Failed to load the PDF mapping for this code entry.',
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingMapping(false);
+        }
+      }
+    };
+
+    void loadMapping();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [detail?.has_pdf, detail?.id]);
 
   if (isLoading) {
     return (
@@ -306,7 +352,12 @@ export function VerifiedCodeViewer({
               </label>
             </div>
           ) : (
-            <LeanCodeHighlighter code={detail.content} />
+            <LeanCodeHighlighter
+              code={detail.content}
+              mappingItems={mappingItems}
+              activeSymbolName={hoveredMappingItem?.symbol_name ?? null}
+              onDeclarationHover={setHoveredMappingItem}
+            />
           )}
         </div>
 
@@ -337,6 +388,40 @@ export function VerifiedCodeViewer({
                   Download PDF
                 </a>
               </div>
+            </div>
+            <div className="verified-pdf-mapping-card">
+              <div className="verified-pdf-mapping-kicker">Lean ↔ PDF Mapping</div>
+              {isLoadingMapping ? (
+                <div className="verified-pdf-mapping-copy">
+                  <LoaderCircle size={15} className="spin" />
+                  Generating PDF excerpts for the Lean declarations...
+                </div>
+              ) : mappingError ? (
+                <div className="verified-pdf-mapping-copy">{mappingError}</div>
+              ) : hoveredMappingItem ? (
+                <>
+                  <div className="verified-pdf-mapping-header">
+                    <strong>
+                      {hoveredMappingItem.declaration_kind} {hoveredMappingItem.symbol_name}
+                    </strong>
+                    {hoveredMappingItem.pdf_page ? (
+                      <span className="proof-badge">Page {hoveredMappingItem.pdf_page}</span>
+                    ) : null}
+                  </div>
+                  <p className="verified-pdf-mapping-excerpt">{hoveredMappingItem.pdf_excerpt}</p>
+                  {hoveredMappingItem.reason ? (
+                    <p className="verified-pdf-mapping-reason">{hoveredMappingItem.reason}</p>
+                  ) : null}
+                </>
+              ) : mappingItems.length > 0 ? (
+                <div className="verified-pdf-mapping-copy">
+                  Hover a mapped Lean declaration to preview the corresponding PDF excerpt here.
+                </div>
+              ) : (
+                <div className="verified-pdf-mapping-copy">
+                  No PDF mapping could be generated for the current Lean declarations yet.
+                </div>
+              )}
             </div>
             <iframe
               className="verified-pdf-frame"

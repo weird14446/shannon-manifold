@@ -1884,6 +1884,57 @@ h6 {
   background: #ffffff;
 }
 
+.verified-pdf-mapping-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.verified-pdf-mapping-kicker {
+  color: var(--accent-color);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.verified-pdf-mapping-copy,
+.verified-pdf-mapping-reason {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.verified-pdf-mapping-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.verified-pdf-mapping-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.verified-pdf-mapping-header strong {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.98rem;
+}
+
+.verified-pdf-mapping-excerpt {
+  margin: 0;
+  color: #edf4ff;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
 .verified-code-field {
   display: flex;
   flex-direction: column;
@@ -1933,6 +1984,22 @@ h6 {
 
 .lean-code-line:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.lean-code-line.is-mapped {
+  cursor: pointer;
+}
+
+.lean-code-line.is-mapped:hover {
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.lean-code-line.is-active {
+  background: rgba(0, 212, 255, 0.12);
+}
+
+.lean-code-line.is-active .lean-code-line-number {
+  color: #9defff;
 }
 
 .lean-code-line-number {

@@ -22,6 +22,7 @@ from services.lean_workspace import (
 from services.project_workspace import validate_project_context_copy
 from services.proof_pipeline import build_formalization_bundle, extract_text_from_pdf
 from services.rag_index import sync_proof_workspace_to_rag
+from services.verified_build_jobs import enqueue_verified_build_job
 
 router = APIRouter(prefix="/proofs", tags=["proofs"])
 settings = get_settings()
@@ -45,6 +46,9 @@ class ProofWorkspaceSummaryResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    build_job_id: str | None = None
+    build_status: str | None = None
+    build_error: str | None = None
 
 
 class ProofWorkspaceResponse(ProofWorkspaceSummaryResponse):
@@ -263,6 +267,7 @@ async def upload_pdf_workspace(
     )
 
     previous_pdf_path: str | None = None
+    final_workspace_status = "edited" if preserved_lean_code else bundle["status"]
     if workspace_id is not None:
         workspace = _get_workspace_or_404(db, current_user, workspace_id)
         previous_pdf_path = workspace.pdf_path
@@ -274,7 +279,7 @@ async def upload_pdf_workspace(
         workspace.extracted_text = bundle["extracted_text"]
         workspace.lean4_code = preserved_lean_code or bundle["lean4_code"]
         workspace.rocq_code = bundle["rocq_code"]
-        workspace.status = "edited" if preserved_lean_code else bundle["status"]
+        workspace.status = "building"
         workspace.agent_trace_json = bundle["agent_trace_json"]
         response.status_code = status.HTTP_200_OK
     else:
@@ -288,7 +293,7 @@ async def upload_pdf_workspace(
             extracted_text=bundle["extracted_text"],
             lean4_code=preserved_lean_code or bundle["lean4_code"],
             rocq_code=bundle["rocq_code"],
-            status="edited" if preserved_lean_code else bundle["status"],
+            status="building",
             agent_trace_json=bundle["agent_trace_json"],
         )
         db.add(workspace)
@@ -304,24 +309,24 @@ async def upload_pdf_workspace(
         code=workspace.lean4_code,
         title=workspace.title,
     )
-    await _build_saved_workspace_async_or_422(
-        saved_file,
-        content=workspace.lean4_code,
-        project_root=project_root,
-        project_file_path=project_file_path,
-    )
-    await sync_proof_workspace_to_rag(
-        db,
+    queued_job = enqueue_verified_build_job(
         settings=settings,
-        workspace=workspace,
+        owner_id=current_user.id,
         saved_path=saved_file["path"],
         saved_module=saved_file["module"],
+        title=workspace.title,
+        code=workspace.lean4_code,
+        proof_workspace_id=workspace.id,
+        pdf_filename=workspace.source_filename if workspace.pdf_path else None,
         project_root=project_root,
         project_file_path=project_file_path,
+        final_workspace_status=final_workspace_status,
     )
-    db.commit()
-    db.refresh(workspace)
-    return _to_detail_response(workspace)
+    detail = _to_detail_response(workspace)
+    detail.build_job_id = str(queued_job["job_id"])
+    detail.build_status = str(queued_job["status"])
+    detail.build_error = queued_job["error"] if isinstance(queued_job["error"], str) else None
+    return detail
 
 
 @router.put("/{workspace_id}", response_model=ProofWorkspaceResponse)
