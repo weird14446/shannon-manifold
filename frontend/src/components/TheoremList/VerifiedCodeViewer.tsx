@@ -7,6 +7,9 @@ import {
   FileCode2,
   FileText,
   LoaderCircle,
+  MessageSquare,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Save,
   Trash2,
@@ -14,6 +17,7 @@ import {
 
 import {
   deleteTheorem,
+  type DiscussionThreadSummary,
   getTheoremDetail,
   getTheoremPdfMapping,
   getTheoremPdfUrl,
@@ -22,7 +26,12 @@ import {
   type TheoremPdfMappingItem,
   updateTheorem,
 } from '../../api';
-import { LeanCodeHighlighter } from './LeanCodeHighlighter';
+import { DiscussionPanel, type DiscussionAnchorSelection } from '../Discussion/DiscussionPanel';
+import {
+  buildLeanDeclarationKey,
+  LeanCodeHighlighter,
+  type LeanDeclarationAnchor,
+} from './LeanCodeHighlighter';
 
 interface VerifiedCodeViewerProps {
   currentUser: AuthUser | null;
@@ -53,8 +62,13 @@ export function VerifiedCodeViewer({
   const [isDeleting, setIsDeleting] = useState(false);
   const [mappingItems, setMappingItems] = useState<TheoremPdfMappingItem[]>([]);
   const [hoveredMappingItem, setHoveredMappingItem] = useState<TheoremPdfMappingItem | null>(null);
+  const [selectedPdfDiscussionItem, setSelectedPdfDiscussionItem] = useState<TheoremPdfMappingItem | null>(null);
   const [isLoadingMapping, setIsLoadingMapping] = useState(false);
   const [mappingError, setMappingError] = useState('');
+  const [isDiscussionOpen, setIsDiscussionOpen] = useState(true);
+  const [discussionTab, setDiscussionTab] = useState<'general' | 'code' | 'pdf'>('general');
+  const [selectedDeclaration, setSelectedDeclaration] = useState<LeanDeclarationAnchor | null>(null);
+  const [codeDiscussionThreads, setCodeDiscussionThreads] = useState<DiscussionThreadSummary[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -89,6 +103,13 @@ export function VerifiedCodeViewer({
       isMounted = false;
     };
   }, [documentId]);
+
+  useEffect(() => {
+    setDiscussionTab('general');
+    setSelectedDeclaration(null);
+    setSelectedPdfDiscussionItem(null);
+    setCodeDiscussionThreads([]);
+  }, [detail?.id]);
 
   const updatedAtLabel = useMemo(() => {
     if (!detail) {
@@ -177,6 +198,7 @@ export function VerifiedCodeViewer({
     if (!detail?.has_pdf) {
       setMappingItems([]);
       setHoveredMappingItem(null);
+      setSelectedPdfDiscussionItem(null);
       setMappingError('');
       setIsLoadingMapping(false);
       return;
@@ -210,6 +232,68 @@ export function VerifiedCodeViewer({
       isMounted = false;
     };
   }, [detail?.has_pdf, detail?.id]);
+
+  useEffect(() => {
+    if (!hasPdfPreview && discussionTab === 'pdf') {
+      setDiscussionTab('general');
+    }
+  }, [discussionTab, hasPdfPreview]);
+
+  const selectedDeclarationKey = selectedDeclaration
+    ? buildLeanDeclarationKey(selectedDeclaration.symbol_name, selectedDeclaration.start_line)
+    : null;
+
+  const codeDiscussionCounts = useMemo(() => {
+    return codeDiscussionThreads.reduce<Record<string, number>>((accumulator, thread) => {
+      const symbolName = String(thread.anchor_json.symbol_name ?? '');
+      const startLine = Number(thread.anchor_json.start_line ?? 0);
+      if (!symbolName || startLine <= 0) {
+        return accumulator;
+      }
+      const key = buildLeanDeclarationKey(symbolName, startLine);
+      accumulator[key] = (accumulator[key] ?? 0) + 1;
+      return accumulator;
+    }, {});
+  }, [codeDiscussionThreads]);
+
+  const theoremScopeKey = detail ? `theorem:${detail.id}` : '';
+  const activePdfDiscussionItem = selectedPdfDiscussionItem ?? hoveredMappingItem;
+
+  const codeAnchor = useMemo<DiscussionAnchorSelection | null>(() => {
+    if (!detail || !selectedDeclaration) {
+      return null;
+    }
+    return {
+      anchor_type: 'lean_decl',
+      label: `${selectedDeclaration.declaration_kind} ${selectedDeclaration.symbol_name}`,
+      anchor_json: {
+        document_id: detail.id,
+        symbol_name: selectedDeclaration.symbol_name,
+        declaration_kind: selectedDeclaration.declaration_kind,
+        start_line: selectedDeclaration.start_line,
+        end_line: selectedDeclaration.end_line,
+      },
+    };
+  }, [detail, selectedDeclaration]);
+
+  const pdfAnchor = useMemo<DiscussionAnchorSelection | null>(() => {
+    if (!detail || !activePdfDiscussionItem || !activePdfDiscussionItem.pdf_page) {
+      return null;
+    }
+    return {
+      anchor_type: 'pdf_page',
+      label: `Page ${activePdfDiscussionItem.pdf_page}${activePdfDiscussionItem.symbol_name ? ` · ${activePdfDiscussionItem.symbol_name}` : ''}`,
+      anchor_json: {
+        document_id: detail.id,
+        pdf_page: activePdfDiscussionItem.pdf_page,
+        pdf_excerpt: activePdfDiscussionItem.pdf_excerpt,
+        symbol_name: activePdfDiscussionItem.symbol_name,
+        declaration_kind: activePdfDiscussionItem.declaration_kind,
+        start_line: activePdfDiscussionItem.start_line,
+        end_line: activePdfDiscussionItem.end_line,
+      },
+    };
+  }, [activePdfDiscussionItem, detail]);
 
   if (isLoading) {
     return (
@@ -258,6 +342,14 @@ export function VerifiedCodeViewer({
           <button type="button" className="button-secondary" onClick={handleOpenPlayground}>
             <ExternalLink size={16} />
             Open in Lean Playground
+          </button>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => setIsDiscussionOpen((current) => !current)}
+          >
+            {isDiscussionOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            {isDiscussionOpen ? 'Hide Discussion' : 'Show Discussion'}
           </button>
           {detail.can_edit && (
             <>
@@ -324,112 +416,232 @@ export function VerifiedCodeViewer({
         </div>
       )}
 
-      <div className={`verified-code-layout ${hasPdfPreview ? 'has-pdf' : ''}`}>
-        <div className="verified-code-panel">
-          <div className="verified-code-kicker">
-            <FileCode2 size={16} />
-            Lean Source
-          </div>
-          {isEditing ? (
-            <div className="verified-code-editor">
-              <label className="verified-code-field">
-                <span>Title</span>
-                <input
-                  className="input-field"
-                  value={draftTitle}
-                  onChange={(event) => setDraftTitle(event.target.value)}
-                  placeholder="Lean module title"
-                />
-              </label>
-              <label className="verified-code-field verified-code-field-grow">
-                <span>Lean Source</span>
-                <textarea
-                  className="proof-textarea verified-code-textarea"
-                  value={draftContent}
-                  onChange={(event) => setDraftContent(event.target.value)}
-                  spellCheck={false}
-                />
-              </label>
+      <div className={`verified-code-shell ${isDiscussionOpen ? 'has-discussion' : ''}`}>
+        <div className="verified-code-content">
+          <div className={`verified-code-layout ${hasPdfPreview ? 'has-pdf' : ''}`}>
+            <div className="verified-code-panel">
+              <div className="verified-code-kicker">
+                <FileCode2 size={16} />
+                Lean Source
+              </div>
+              <div className="verified-code-scroll-shell">
+                {isEditing ? (
+                  <div className="verified-code-editor">
+                    <label className="verified-code-field">
+                      <span>Title</span>
+                      <input
+                        className="input-field"
+                        value={draftTitle}
+                        onChange={(event) => setDraftTitle(event.target.value)}
+                        placeholder="Lean module title"
+                      />
+                    </label>
+                    <label className="verified-code-field verified-code-field-grow">
+                      <span>Lean Source</span>
+                      <textarea
+                        className="proof-textarea verified-code-textarea"
+                        value={draftContent}
+                        onChange={(event) => setDraftContent(event.target.value)}
+                        spellCheck={false}
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <LeanCodeHighlighter
+                    code={detail.content}
+                    mappingItems={mappingItems}
+                    activeSymbolName={hoveredMappingItem?.symbol_name ?? selectedPdfDiscussionItem?.symbol_name ?? null}
+                    onDeclarationHover={setHoveredMappingItem}
+                    onDeclarationSelect={(declaration) => {
+                      setSelectedDeclaration(declaration);
+                      setDiscussionTab('code');
+                      setIsDiscussionOpen(true);
+                    }}
+                    selectedDeclarationKey={selectedDeclarationKey}
+                    declarationDiscussionCounts={codeDiscussionCounts}
+                  />
+                )}
+              </div>
             </div>
-          ) : (
-            <LeanCodeHighlighter
-              code={detail.content}
-              mappingItems={mappingItems}
-              activeSymbolName={hoveredMappingItem?.symbol_name ?? null}
-              onDeclarationHover={setHoveredMappingItem}
-            />
-          )}
+
+            {hasPdfPreview && pdfPreviewUrl && pdfDownloadUrl && (
+              <div className="verified-pdf-panel">
+                <div className="verified-pdf-header">
+                  <div>
+                    <div className="verified-code-kicker">
+                      <FileText size={16} />
+                      Source PDF
+                    </div>
+                    <p className="verified-pdf-copy">
+                      {detail.pdf_filename ?? 'Original uploaded PDF'}
+                    </p>
+                  </div>
+                  <div className="verified-code-actions">
+                    <a
+                      className="button-secondary"
+                      href={pdfPreviewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink size={16} />
+                      Open PDF
+                    </a>
+                    <a className="button-secondary" href={pdfDownloadUrl}>
+                      <Download size={16} />
+                      Download PDF
+                    </a>
+                  </div>
+                </div>
+                <div className="verified-pdf-mapping-card">
+                  <div className="verified-pdf-mapping-kicker">Lean ↔ PDF Mapping</div>
+                  {isLoadingMapping ? (
+                    <div className="verified-pdf-mapping-copy">
+                      <LoaderCircle size={15} className="spin" />
+                      Generating PDF excerpts for the Lean declarations...
+                    </div>
+                  ) : mappingError ? (
+                    <div className="verified-pdf-mapping-copy">{mappingError}</div>
+                  ) : hoveredMappingItem ? (
+                    <>
+                      <div className="verified-pdf-mapping-header">
+                        <strong>
+                          {hoveredMappingItem.declaration_kind} {hoveredMappingItem.symbol_name}
+                        </strong>
+                        {hoveredMappingItem.pdf_page ? (
+                          <span className="proof-badge">Page {hoveredMappingItem.pdf_page}</span>
+                        ) : null}
+                      </div>
+                      <p className="verified-pdf-mapping-excerpt">{hoveredMappingItem.pdf_excerpt}</p>
+                      {hoveredMappingItem.reason ? (
+                        <p className="verified-pdf-mapping-reason">{hoveredMappingItem.reason}</p>
+                      ) : null}
+                      <div className="discussion-composer-actions">
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => {
+                            setSelectedPdfDiscussionItem(hoveredMappingItem);
+                            setDiscussionTab('pdf');
+                            setIsDiscussionOpen(true);
+                          }}
+                        >
+                          <MessageSquare size={16} />
+                          Discuss This Mapping
+                        </button>
+                      </div>
+                    </>
+                  ) : selectedPdfDiscussionItem ? (
+                    <>
+                      <div className="verified-pdf-mapping-header">
+                        <strong>
+                          {selectedPdfDiscussionItem.declaration_kind} {selectedPdfDiscussionItem.symbol_name}
+                        </strong>
+                        {selectedPdfDiscussionItem.pdf_page ? (
+                          <span className="proof-badge">Page {selectedPdfDiscussionItem.pdf_page}</span>
+                        ) : null}
+                      </div>
+                      <p className="verified-pdf-mapping-excerpt">
+                        {selectedPdfDiscussionItem.pdf_excerpt}
+                      </p>
+                    </>
+                  ) : mappingItems.length > 0 ? (
+                    <div className="verified-pdf-mapping-copy">
+                      Hover a mapped Lean declaration to preview the corresponding PDF excerpt here.
+                    </div>
+                  ) : (
+                    <div className="verified-pdf-mapping-copy">
+                      No PDF mapping could be generated for the current Lean declarations yet.
+                    </div>
+                  )}
+                </div>
+                <iframe
+                  className="verified-pdf-frame"
+                  src={pdfPreviewUrl}
+                  title={`${detail.title} PDF preview`}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
-        {hasPdfPreview && pdfPreviewUrl && pdfDownloadUrl && (
-          <div className="verified-pdf-panel">
-            <div className="verified-pdf-header">
-              <div>
-                <div className="verified-code-kicker">
-                  <FileText size={16} />
-                  Source PDF
-                </div>
-                <p className="verified-pdf-copy">
-                  {detail.pdf_filename ?? 'Original uploaded PDF'}
-                </p>
-              </div>
-              <div className="verified-code-actions">
-                <a
-                  className="button-secondary"
-                  href={pdfPreviewUrl}
-                  target="_blank"
-                  rel="noreferrer"
+        {isDiscussionOpen ? (
+          <aside className="verified-discussion-drawer">
+            <div className="discussion-tab-bar">
+              <button
+                type="button"
+                className={`discussion-tab ${discussionTab === 'general' ? 'is-active' : ''}`}
+                onClick={() => setDiscussionTab('general')}
+              >
+                General
+              </button>
+              <button
+                type="button"
+                className={`discussion-tab ${discussionTab === 'code' ? 'is-active' : ''}`}
+                onClick={() => setDiscussionTab('code')}
+              >
+                Code
+              </button>
+              {hasPdfPreview ? (
+                <button
+                  type="button"
+                  className={`discussion-tab ${discussionTab === 'pdf' ? 'is-active' : ''}`}
+                  onClick={() => setDiscussionTab('pdf')}
                 >
-                  <ExternalLink size={16} />
-                  Open PDF
-                </a>
-                <a className="button-secondary" href={pdfDownloadUrl}>
-                  <Download size={16} />
-                  Download PDF
-                </a>
-              </div>
+                  PDF
+                </button>
+              ) : null}
             </div>
-            <div className="verified-pdf-mapping-card">
-              <div className="verified-pdf-mapping-kicker">Lean ↔ PDF Mapping</div>
-              {isLoadingMapping ? (
-                <div className="verified-pdf-mapping-copy">
-                  <LoaderCircle size={15} className="spin" />
-                  Generating PDF excerpts for the Lean declarations...
-                </div>
-              ) : mappingError ? (
-                <div className="verified-pdf-mapping-copy">{mappingError}</div>
-              ) : hoveredMappingItem ? (
-                <>
-                  <div className="verified-pdf-mapping-header">
-                    <strong>
-                      {hoveredMappingItem.declaration_kind} {hoveredMappingItem.symbol_name}
-                    </strong>
-                    {hoveredMappingItem.pdf_page ? (
-                      <span className="proof-badge">Page {hoveredMappingItem.pdf_page}</span>
-                    ) : null}
-                  </div>
-                  <p className="verified-pdf-mapping-excerpt">{hoveredMappingItem.pdf_excerpt}</p>
-                  {hoveredMappingItem.reason ? (
-                    <p className="verified-pdf-mapping-reason">{hoveredMappingItem.reason}</p>
-                  ) : null}
-                </>
-              ) : mappingItems.length > 0 ? (
-                <div className="verified-pdf-mapping-copy">
-                  Hover a mapped Lean declaration to preview the corresponding PDF excerpt here.
-                </div>
-              ) : (
-                <div className="verified-pdf-mapping-copy">
-                  No PDF mapping could be generated for the current Lean declarations yet.
-                </div>
-              )}
-            </div>
-            <iframe
-              className="verified-pdf-frame"
-              src={pdfPreviewUrl}
-              title={`${detail.title} PDF preview`}
-            />
-          </div>
-        )}
+
+            {discussionTab === 'general' ? (
+              <DiscussionPanel
+                title="Theorem Discussion"
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
+                scopeType="theorem"
+                scopeKey={theoremScopeKey}
+                anchorType="general"
+                emptyMessage="No theorem-wide discussion has started yet."
+              />
+            ) : null}
+
+            {discussionTab === 'code' ? (
+              <DiscussionPanel
+                title="Code Discussions"
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
+                scopeType="theorem"
+                scopeKey={theoremScopeKey}
+                anchorType="lean_decl"
+                currentAnchor={codeAnchor}
+                emptyMessage={
+                  codeAnchor
+                    ? 'No discussion threads exist for the selected declaration yet.'
+                    : 'No declaration discussions exist for this theorem yet.'
+                }
+                selectionRequiredMessage="Click a theorem / lemma / def declaration in the Lean source to start a thread for it."
+                onSummariesChange={setCodeDiscussionThreads}
+              />
+            ) : null}
+
+            {discussionTab === 'pdf' && hasPdfPreview ? (
+              <DiscussionPanel
+                title="PDF Discussions"
+                currentUser={currentUser}
+                onOpenAuth={onOpenAuth}
+                scopeType="theorem"
+                scopeKey={theoremScopeKey}
+                anchorType="pdf_page"
+                currentAnchor={pdfAnchor}
+                emptyMessage={
+                  pdfAnchor
+                    ? 'No discussion threads exist for the selected PDF anchor yet.'
+                    : 'No PDF discussions exist for this theorem yet.'
+                }
+                selectionRequiredMessage="Use a mapped PDF excerpt from the PDF panel to anchor a discussion thread."
+              />
+            ) : null}
+          </aside>
+        ) : null}
       </div>
     </section>
   );

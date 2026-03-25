@@ -172,6 +172,43 @@ export interface TheoremPdfMapping {
   items: TheoremPdfMappingItem[];
 }
 
+export interface DiscussionComment {
+  id: number;
+  thread_id: number;
+  author_id: number;
+  author_name: string;
+  parent_id: number | null;
+  parent_author_name: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  can_delete: boolean;
+}
+
+export interface DiscussionThreadSummary {
+  id: number;
+  scope_type: 'theorem' | 'project';
+  scope_key: string;
+  anchor_type: 'general' | 'lean_decl' | 'pdf_page' | 'project_readme';
+  anchor_key: string;
+  anchor_json: Record<string, unknown>;
+  anchor_label: string;
+  status: 'open' | 'resolved';
+  is_outdated: boolean;
+  created_by: number;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+  latest_activity_at: string;
+  comment_count: number;
+  latest_comment_preview: string | null;
+  can_resolve: boolean;
+}
+
+export interface DiscussionThreadDetail extends DiscussionThreadSummary {
+  comments: DiscussionComment[];
+}
+
 export interface LeanWorkspaceModule {
   path: string;
   module: string;
@@ -483,6 +520,64 @@ export const updateTheorem = async (
 
 export const deleteTheorem = async (theoremId: number) => {
   await api.delete(`/theorems/${theoremId}`);
+};
+
+export const listDiscussionThreads = async (params: {
+  scope_type: 'theorem' | 'project';
+  scope_key: string;
+  anchor_type?: 'general' | 'lean_decl' | 'pdf_page' | 'project_readme';
+}) => {
+  const response = await api.get<DiscussionThreadSummary[]>('/discussions/', {
+    params,
+  });
+  return response.data;
+};
+
+export const createDiscussionThread = async (payload: {
+  scope_type: 'theorem' | 'project';
+  scope_key: string;
+  anchor_type: 'general' | 'lean_decl' | 'pdf_page' | 'project_readme';
+  anchor_json?: Record<string, unknown>;
+  body: string;
+}) => {
+  const response = await api.post<DiscussionThreadDetail>('/discussions/threads', payload);
+  return response.data;
+};
+
+export const getDiscussionThread = async (threadId: number) => {
+  const response = await api.get<DiscussionThreadDetail>(`/discussions/threads/${threadId}`);
+  return response.data;
+};
+
+export const createDiscussionComment = async (
+  threadId: number,
+  payload: {
+    body: string;
+    parent_id?: number | null;
+  },
+) => {
+  const response = await api.post<DiscussionThreadDetail>(
+    `/discussions/threads/${threadId}/comments`,
+    payload,
+  );
+  return response.data;
+};
+
+export const updateDiscussionThread = async (
+  threadId: number,
+  payload: {
+    status: 'open' | 'resolved';
+  },
+) => {
+  const response = await api.patch<DiscussionThreadDetail>(
+    `/discussions/threads/${threadId}`,
+    payload,
+  );
+  return response.data;
+};
+
+export const deleteDiscussionComment = async (commentId: number) => {
+  await api.delete(`/discussions/comments/${commentId}`);
 };
 
 export const getLeanImportGraph = async () => {

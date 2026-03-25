@@ -23,6 +23,7 @@ import {
   type ProjectDetail,
   type ProjectSummary,
 } from '../../api';
+import { DiscussionPanel, type DiscussionAnchorSelection } from '../Discussion/DiscussionPanel';
 
 interface ProjectPanelProps {
   isOpen?: boolean;
@@ -53,6 +54,7 @@ export function ProjectPanel({
   const [isCreating, setIsCreating] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [discussionTab, setDiscussionTab] = useState<'general' | 'readme'>('general');
   const [error, setError] = useState('');
 
   const selectedProjectSummary = useMemo(
@@ -155,9 +157,27 @@ export function ProjectPanel({
     };
   }, [selectedProjectSummary]);
 
+  useEffect(() => {
+    setDiscussionTab('general');
+  }, [selectedProjectKey]);
+
   if (!isVisible) {
     return null;
   }
+
+  const projectScopeKey = selectedProjectDetail
+    ? `project:${selectedProjectDetail.project_root}`
+    : '';
+  const readmeAnchor = selectedProjectDetail
+    ? ({
+        anchor_type: 'project_readme',
+        label: selectedProjectDetail.readme_path,
+        anchor_json: {
+          project_root: selectedProjectDetail.project_root,
+          readme_path: selectedProjectDetail.readme_path,
+        },
+      } satisfies DiscussionAnchorSelection)
+    : null;
 
   const resetEditor = () => {
     setEditingProjectSlug(null);
@@ -485,6 +505,56 @@ export function ProjectPanel({
             </div>
           </section>
         </div>
+
+        <section className="glass-panel project-discussion-section">
+          <div className="project-detail-panel-header">
+            <div className="account-panel-icon">
+              <FileText size={18} />
+            </div>
+            <div>
+              <h3>Discussions</h3>
+              <p>Keep project decisions attached to the project itself instead of a separate board.</p>
+            </div>
+          </div>
+          <div className="discussion-tab-bar">
+            <button
+              type="button"
+              className={`discussion-tab ${discussionTab === 'general' ? 'is-active' : ''}`}
+              onClick={() => setDiscussionTab('general')}
+            >
+              General
+            </button>
+            <button
+              type="button"
+              className={`discussion-tab ${discussionTab === 'readme' ? 'is-active' : ''}`}
+              onClick={() => setDiscussionTab('readme')}
+            >
+              README
+            </button>
+          </div>
+          {discussionTab === 'general' ? (
+            <DiscussionPanel
+              title="Project Discussion"
+              currentUser={currentUser}
+              onOpenAuth={onOpenAuth}
+              scopeType="project"
+              scopeKey={projectScopeKey}
+              anchorType="general"
+              emptyMessage="No project-wide discussion has started yet."
+            />
+          ) : (
+            <DiscussionPanel
+              title="README Discussion"
+              currentUser={currentUser}
+              onOpenAuth={onOpenAuth}
+              scopeType="project"
+              scopeKey={projectScopeKey}
+              anchorType="project_readme"
+              currentAnchor={readmeAnchor}
+              emptyMessage="No README discussion threads exist for this project yet."
+            />
+          )}
+        </section>
       </div>
     )
   ) : (

@@ -61,11 +61,21 @@ export interface LeanPdfMappingItem {
   reason: string | null;
 }
 
+export interface LeanDeclarationAnchor {
+  declaration_kind: string;
+  symbol_name: string;
+  start_line: number;
+  end_line: number;
+}
+
 interface LeanCodeHighlighterProps {
   code: string;
   mappingItems?: LeanPdfMappingItem[];
   activeSymbolName?: string | null;
   onDeclarationHover?: (item: LeanPdfMappingItem | null) => void;
+  onDeclarationSelect?: (declaration: LeanDeclarationAnchor) => void;
+  selectedDeclarationKey?: string | null;
+  declarationDiscussionCounts?: Record<string, number>;
 }
 
 const TOP_LEVEL_DECLARATION_RE =
@@ -209,21 +219,18 @@ function tokenizeLine(line: string, state: TokenizeState): Token[] {
   return tokens;
 }
 
-function extractDeclarationRanges(code: string) {
+export function buildLeanDeclarationKey(symbolName: string, startLine: number) {
+  return `${symbolName}:${startLine}`;
+}
+
+function extractDeclarationRanges(code: string): LeanDeclarationAnchor[] {
   const lines = code.split('\n');
   if (lines.length === 0) {
     return [];
   }
 
-  type DeclarationRange = {
-    declarationKind: string;
-    symbolName: string;
-    startLine: number;
-    endLine: number;
-  };
-
-  const declarations: DeclarationRange[] = [];
-  let current: Omit<DeclarationRange, 'endLine'> | null = null;
+  const declarations: LeanDeclarationAnchor[] = [];
+  let current: Omit<LeanDeclarationAnchor, 'end_line'> | null = null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -234,25 +241,25 @@ function extractDeclarationRanges(code: string) {
     }
     if (current) {
       declarations.push({
-        declarationKind: current.declarationKind,
-        symbolName: current.symbolName,
-        startLine: current.startLine,
-        endLine: lineNumber - 1,
+        declaration_kind: current.declaration_kind,
+        symbol_name: current.symbol_name,
+        start_line: current.start_line,
+        end_line: lineNumber - 1,
       });
     }
     current = {
-      declarationKind: match[1],
-      symbolName: match[2],
-      startLine: lineNumber,
+      declaration_kind: match[1],
+      symbol_name: match[2],
+      start_line: lineNumber,
     };
   }
 
   if (current !== null) {
     declarations.push({
-      declarationKind: current.declarationKind,
-      symbolName: current.symbolName,
-      startLine: current.startLine,
-      endLine: lines.length,
+      declaration_kind: current.declaration_kind,
+      symbol_name: current.symbol_name,
+      start_line: current.start_line,
+      end_line: lines.length,
     });
   }
   return declarations;
@@ -263,6 +270,9 @@ export function LeanCodeHighlighter({
   mappingItems = [],
   activeSymbolName = null,
   onDeclarationHover,
+  onDeclarationSelect,
+  selectedDeclarationKey = null,
+  declarationDiscussionCounts = {},
 }: LeanCodeHighlighterProps) {
   const lines = code.split('\n');
   const state: TokenizeState = { blockCommentDepth: 0 };
@@ -271,8 +281,8 @@ export function LeanCodeHighlighter({
     .map((range) => {
       const item = mappingItems.find(
         (candidate) =>
-          candidate.symbol_name === range.symbolName &&
-          candidate.start_line === range.startLine,
+          candidate.symbol_name === range.symbol_name &&
+          candidate.start_line === range.start_line,
       );
       return item
         ? {
@@ -284,7 +294,12 @@ export function LeanCodeHighlighter({
     .filter((value): value is NonNullable<typeof value> => value !== null);
 
   const findMappedRangeByLine = (lineNumber: number) =>
-    mappedRanges.find((range) => lineNumber >= range.startLine && lineNumber <= range.endLine) ?? null;
+    mappedRanges.find((range) => lineNumber >= range.start_line && lineNumber <= range.end_line) ?? null;
+
+  const findDeclarationByLine = (lineNumber: number) =>
+    declarationRanges.find(
+      (range) => lineNumber >= range.start_line && lineNumber <= range.end_line,
+    ) ?? null;
 
   return (
     <div className="lean-code-block" role="region" aria-label="Lean code">
@@ -292,17 +307,38 @@ export function LeanCodeHighlighter({
         const tokens = tokenizeLine(line, state);
         const lineNumber = lineIndex + 1;
         const mappedRange = findMappedRangeByLine(lineNumber);
+        const declarationRange = findDeclarationByLine(lineNumber);
         const isActive = Boolean(
           mappedRange && activeSymbolName && mappedRange.item.symbol_name === activeSymbolName,
         );
+        const declarationKey = declarationRange
+          ? buildLeanDeclarationKey(declarationRange.symbol_name, declarationRange.start_line)
+          : null;
+        const isSelected = Boolean(
+          declarationKey && selectedDeclarationKey && declarationKey === selectedDeclarationKey,
+        );
+        const threadCount =
+          declarationRange && declarationRange.start_line === lineNumber && declarationKey
+            ? declarationDiscussionCounts[declarationKey] ?? 0
+            : 0;
         return (
           <div
             key={lineIndex}
-            className={`lean-code-line${mappedRange ? ' is-mapped' : ''}${isActive ? ' is-active' : ''}`}
+            className={`lean-code-line${mappedRange ? ' is-mapped' : ''}${isActive ? ' is-active' : ''}${isSelected ? ' is-selected' : ''}${declarationRange ? ' is-declaration' : ''}`}
             onMouseEnter={() => onDeclarationHover?.(mappedRange?.item ?? null)}
             onMouseLeave={() => onDeclarationHover?.(null)}
+            onClick={() => {
+              if (declarationRange) {
+                onDeclarationSelect?.(declarationRange);
+              }
+            }}
           >
-            <span className="lean-code-line-number">{lineIndex + 1}</span>
+            <span className="lean-code-line-number">
+              <span>{lineIndex + 1}</span>
+              {threadCount > 0 ? (
+                <span className="lean-code-discussion-badge">{threadCount}</span>
+              ) : null}
+            </span>
             <span className="lean-code-line-content">
               {tokens.length > 0 ? (
                 tokens.map((token, tokenIndex) => (
