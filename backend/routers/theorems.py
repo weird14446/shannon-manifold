@@ -49,6 +49,8 @@ class TheoremSummaryResponse(BaseModel):
     project_slug: str | None = None
     project_title: str | None = None
     project_owner_slug: str | None = None
+    project_file_path: str | None = None
+    project_module_name: str | None = None
 
 
 class TheoremDetailResponse(TheoremSummaryResponse):
@@ -154,6 +156,8 @@ def _build_summary(
         project_slug=str(metadata.get("project_slug")) if metadata.get("project_slug") else None,
         project_title=str(metadata.get("project_title")) if metadata.get("project_title") else None,
         project_owner_slug=str(metadata.get("owner_slug")) if metadata.get("owner_slug") else None,
+        project_file_path=str(metadata.get("project_file_path")) if metadata.get("project_file_path") else None,
+        project_module_name=str(metadata.get("project_module_name")) if metadata.get("project_module_name") else None,
     )
 
 

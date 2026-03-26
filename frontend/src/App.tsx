@@ -6,6 +6,7 @@ import {
   type ChatCodeContextPayload,
   getCurrentUser,
   hasStoredToken,
+  type RemixProvenancePayload,
   setAuthToken,
   type AuthResponse,
   type AuthUser,
@@ -35,12 +36,33 @@ interface DashboardProjectFilterOption {
   label: string;
 }
 
+type RemixSaveTargetState =
+  | {
+      kind: 'scratch';
+      validation_project_root: string | null;
+      validation_project_file_path: string | null;
+    }
+  | {
+      kind: 'project';
+      target_project_slug: string;
+      target_project_owner_slug: string;
+      target_project_title: string;
+      target_project_root: string;
+      target_project_file_path: string;
+      target_project_module_name: string;
+      validation_project_root: string;
+      validation_project_file_path: string;
+    };
+
 interface PlaygroundSeed {
   code: string;
   revision: number;
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  linkedPdfFilename?: string | null;
+  linkedPdfPreviewUrl?: string | null;
+  linkedPdfDownloadUrl?: string | null;
   projectSlug?: string | null;
   projectOwnerSlug?: string | null;
   projectTitle?: string | null;
@@ -53,7 +75,11 @@ interface PlaygroundSeed {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
+  remixProvenance?: RemixProvenancePayload | null;
+  remixSaveTarget?: RemixSaveTargetState | null;
 }
+
+type PlaygroundSessionMetadata = Omit<PlaygroundSeed, 'code' | 'revision'>;
 
 const getInitialView = (): AppView => {
   if (typeof window === 'undefined') {
@@ -130,6 +156,9 @@ function App() {
   );
   const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(() =>
     getInitialPlaygroundSeed(),
+  );
+  const [playgroundSessionMetadata, setPlaygroundSessionMetadata] = useState<PlaygroundSessionMetadata | null>(
+    null,
   );
   const [playgroundLoaderVersion, setPlaygroundLoaderVersion] = useState(0);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -288,6 +317,9 @@ function App() {
     title: string;
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
+    linkedPdfFilename?: string | null;
+    linkedPdfPreviewUrl?: string | null;
+    linkedPdfDownloadUrl?: string | null;
     projectSlug?: string | null;
     projectOwnerSlug?: string | null;
     projectTitle?: string | null;
@@ -300,6 +332,8 @@ function App() {
     projectModuleName?: string | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
+    remixProvenance?: RemixProvenancePayload | null;
+    remixSaveTarget?: RemixSaveTargetState | null;
   }) => {
     if (seed?.code || seed?.projectSlug) {
       setPlaygroundSeed({
@@ -308,6 +342,9 @@ function App() {
         title: seed.title,
         proofWorkspaceId: seed.proofWorkspaceId ?? null,
         pdfFilename: seed.pdfFilename ?? null,
+        linkedPdfFilename: seed.linkedPdfFilename ?? null,
+        linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+        linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
         projectSlug: seed.projectSlug ?? null,
         projectOwnerSlug: seed.projectOwnerSlug ?? null,
         projectTitle: seed.projectTitle ?? null,
@@ -320,9 +357,34 @@ function App() {
         projectModuleName: seed.projectModuleName ?? null,
         projectEntryFilePath: seed.projectEntryFilePath ?? null,
         projectEntryModuleName: seed.projectEntryModuleName ?? null,
+        remixProvenance: seed.remixProvenance ?? null,
+        remixSaveTarget: seed.remixSaveTarget ?? null,
+      });
+      setPlaygroundSessionMetadata({
+        title: seed.title,
+        proofWorkspaceId: seed.proofWorkspaceId ?? null,
+        pdfFilename: seed.pdfFilename ?? null,
+        linkedPdfFilename: seed.linkedPdfFilename ?? null,
+        linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+        linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
+        projectSlug: seed.projectSlug ?? null,
+        projectOwnerSlug: seed.projectOwnerSlug ?? null,
+        projectTitle: seed.projectTitle ?? null,
+        projectRoot: seed.projectRoot ?? null,
+        packageName: seed.packageName ?? null,
+        projectGithubUrl: seed.projectGithubUrl ?? null,
+        projectVisibility: seed.projectVisibility ?? null,
+        projectCanEdit: seed.projectCanEdit ?? null,
+        projectFilePath: seed.projectFilePath ?? null,
+        projectModuleName: seed.projectModuleName ?? null,
+        projectEntryFilePath: seed.projectEntryFilePath ?? null,
+        projectEntryModuleName: seed.projectEntryModuleName ?? null,
+        remixProvenance: seed.remixProvenance ?? null,
+        remixSaveTarget: seed.remixSaveTarget ?? null,
       });
     } else {
       setPlaygroundSeed(null);
+      setPlaygroundSessionMetadata(null);
     }
 
     setCurrentView('playground');
@@ -339,24 +401,33 @@ function App() {
   };
 
   const handleApplyChatSuggestedCode = (payload: { code: string; title: string }) => {
-    if (currentView === 'playground' && playgroundSeed) {
+    if (currentView === 'playground' && (playgroundSessionMetadata || playgroundSeed)) {
+      const metadata = playgroundSessionMetadata ?? playgroundSeed;
+      if (!metadata) {
+        return;
+      }
       openLeanPlayground({
         code: payload.code,
         title: payload.title,
-        proofWorkspaceId: playgroundSeed.proofWorkspaceId ?? null,
-        pdfFilename: playgroundSeed.pdfFilename ?? null,
-        projectSlug: playgroundSeed.projectSlug ?? null,
-        projectOwnerSlug: playgroundSeed.projectOwnerSlug ?? null,
-        projectTitle: playgroundSeed.projectTitle ?? null,
-        projectRoot: playgroundSeed.projectRoot ?? null,
-        packageName: playgroundSeed.packageName ?? null,
-        projectGithubUrl: playgroundSeed.projectGithubUrl ?? null,
-        projectVisibility: playgroundSeed.projectVisibility ?? null,
-        projectCanEdit: playgroundSeed.projectCanEdit ?? null,
-        projectFilePath: playgroundSeed.projectFilePath ?? null,
-        projectModuleName: playgroundSeed.projectModuleName ?? null,
-        projectEntryFilePath: playgroundSeed.projectEntryFilePath ?? null,
-        projectEntryModuleName: playgroundSeed.projectEntryModuleName ?? null,
+        proofWorkspaceId: metadata.proofWorkspaceId ?? null,
+        pdfFilename: metadata.pdfFilename ?? null,
+        linkedPdfFilename: metadata.linkedPdfFilename ?? null,
+        linkedPdfPreviewUrl: metadata.linkedPdfPreviewUrl ?? null,
+        linkedPdfDownloadUrl: metadata.linkedPdfDownloadUrl ?? null,
+        projectSlug: metadata.projectSlug ?? null,
+        projectOwnerSlug: metadata.projectOwnerSlug ?? null,
+        projectTitle: metadata.projectTitle ?? null,
+        projectRoot: metadata.projectRoot ?? null,
+        packageName: metadata.packageName ?? null,
+        projectGithubUrl: metadata.projectGithubUrl ?? null,
+        projectVisibility: metadata.projectVisibility ?? null,
+        projectCanEdit: metadata.projectCanEdit ?? null,
+        projectFilePath: metadata.projectFilePath ?? null,
+        projectModuleName: metadata.projectModuleName ?? null,
+        projectEntryFilePath: metadata.projectEntryFilePath ?? null,
+        projectEntryModuleName: metadata.projectEntryModuleName ?? null,
+        remixProvenance: metadata.remixProvenance ?? null,
+        remixSaveTarget: metadata.remixSaveTarget ?? null,
       });
       return;
     }
@@ -684,6 +755,7 @@ function App() {
                   currentUser={currentUser}
                   onOpenAuth={() => setIsAuthOpen(true)}
                   onLogout={handleLogout}
+                  onSessionMetadataChange={setPlaygroundSessionMetadata}
                   onDocumentChange={setPlaygroundChatContext}
                   onAttachmentChange={setPlaygroundChatAttachment}
                 />

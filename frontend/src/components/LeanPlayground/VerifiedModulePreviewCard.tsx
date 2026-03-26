@@ -9,6 +9,7 @@ interface VerifiedModulePreviewCardProps {
   isLoading: boolean;
   modulePath: string | null;
   onClose: () => void;
+  onRemix: () => void;
 }
 
 export function VerifiedModulePreviewCard({
@@ -17,6 +18,7 @@ export function VerifiedModulePreviewCard({
   isLoading,
   modulePath,
   onClose,
+  onRemix,
 }: VerifiedModulePreviewCardProps) {
   if (!detail && !error && !isLoading) {
     return null;
@@ -86,6 +88,9 @@ export function VerifiedModulePreviewCard({
             </div>
 
             <div className="playground-module-preview-footer">
+              <button type="button" className="button-secondary" onClick={onRemix}>
+                Remix this module
+              </button>
               <button type="button" className="button-primary" onClick={onClose}>
                 Return to Playground
               </button>

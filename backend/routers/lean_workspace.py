@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -51,6 +52,9 @@ class SyncPlaygroundRequest(BaseModel):
     proof_workspace_id: int | None = None
     project_root: str | None = None
     project_file_path: str | None = None
+    validation_project_root: str | None = None
+    validation_project_file_path: str | None = None
+    remix_provenance: dict[str, Any] | None = None
 
 
 class PushPlaygroundRequest(SyncPlaygroundRequest):
@@ -167,6 +171,9 @@ async def sync_playground_file(
         pdf_filename=linked_pdf_filename,
         project_root=payload.project_root,
         project_file_path=payload.project_file_path,
+        validation_project_root=payload.validation_project_root,
+        validation_project_file_path=payload.validation_project_file_path,
+        remix_provenance=payload.remix_provenance,
         final_workspace_status="edited" if workspace is not None else None,
     )
     return SyncPlaygroundResponse(

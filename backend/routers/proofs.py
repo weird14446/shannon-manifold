@@ -223,10 +223,17 @@ async def upload_pdf_workspace(
     lean4_code: str = Form(default=""),
     project_root: str | None = Form(default=None),
     project_file_path: str | None = Form(default=None),
+    validation_project_root: str | None = Form(default=None),
+    validation_project_file_path: str | None = Form(default=None),
+    remix_provenance: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ProofWorkspaceResponse:
+    parsed_remix_provenance = _parse_form_json_object_or_422(
+        remix_provenance,
+        field_name="remix_provenance",
+    )
     filename = file.filename or "uploaded-proof.pdf"
     if Path(filename).suffix.lower() != ".pdf":
         raise HTTPException(
@@ -320,6 +327,9 @@ async def upload_pdf_workspace(
         pdf_filename=workspace.source_filename if workspace.pdf_path else None,
         project_root=project_root,
         project_file_path=project_file_path,
+        validation_project_root=validation_project_root,
+        validation_project_file_path=validation_project_file_path,
+        remix_provenance=parsed_remix_provenance,
         final_workspace_status=final_workspace_status,
     )
     detail = _to_detail_response(workspace)
@@ -441,6 +451,27 @@ def _safe_delete_uploaded_pdf(file_path: str | None) -> None:
         candidate.unlink(missing_ok=True)
     except OSError:
         return
+
+
+def _parse_form_json_object_or_422(raw_value: str | None, *, field_name: str) -> dict[str, object] | None:
+    if raw_value is None or not raw_value.strip():
+        return None
+
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be valid JSON.",
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field_name} must be a JSON object.",
+        )
+
+    return parsed
 
 
 def _build_saved_workspace_or_422(

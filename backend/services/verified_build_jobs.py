@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+from typing import Any
 from uuid import uuid4
 
 from database import SessionLocal
@@ -29,6 +30,9 @@ class VerifiedBuildJobRecord:
     pdf_filename: str | None
     project_root: str | None
     project_file_path: str | None
+    validation_project_root: str | None
+    validation_project_file_path: str | None
+    remix_provenance: dict[str, Any] | None
     final_workspace_status: str | None
     status: str = "queued"
     error: str | None = None
@@ -105,8 +109,8 @@ async def _validate_saved_target(
     saved_path: str,
     saved_module: str,
     code: str,
-    project_root: str | None,
-    project_file_path: str | None,
+    validation_project_root: str | None,
+    validation_project_file_path: str | None,
 ) -> None:
     try:
         await build_workspace_module(
@@ -116,12 +120,12 @@ async def _validate_saved_target(
         )
         return
     except LeanWorkspaceError as exc:
-        if project_root and project_file_path:
+        if validation_project_root and validation_project_file_path:
             try:
                 await validate_project_context_copy(
                     settings,
-                    project_root=project_root,
-                    source_relative_path=project_file_path,
+                    project_root=validation_project_root,
+                    source_relative_path=validation_project_file_path,
                     content=code,
                 )
                 return
@@ -147,6 +151,9 @@ async def _run_verified_build_job(job_id: str, *, settings) -> None:
             pdf_filename=record.pdf_filename,
             project_root=record.project_root,
             project_file_path=record.project_file_path,
+            validation_project_root=record.validation_project_root,
+            validation_project_file_path=record.validation_project_file_path,
+            remix_provenance=record.remix_provenance,
             final_workspace_status=record.final_workspace_status,
             status=record.status,
             error=record.error,
@@ -174,8 +181,8 @@ async def _run_verified_build_job(job_id: str, *, settings) -> None:
             saved_path=payload.saved_path,
             saved_module=payload.saved_module,
             code=payload.code,
-            project_root=payload.project_root,
-            project_file_path=payload.project_file_path,
+            validation_project_root=payload.validation_project_root,
+            validation_project_file_path=payload.validation_project_file_path,
         )
 
         if workspace is not None:
@@ -188,6 +195,9 @@ async def _run_verified_build_job(job_id: str, *, settings) -> None:
                 saved_module=payload.saved_module,
                 project_root=payload.project_root,
                 project_file_path=payload.project_file_path,
+                validation_project_root=payload.validation_project_root,
+                validation_project_file_path=payload.validation_project_file_path,
+                remix_provenance=payload.remix_provenance,
             )
         else:
             await sync_playground_document_to_rag(
@@ -200,6 +210,9 @@ async def _run_verified_build_job(job_id: str, *, settings) -> None:
                 content=payload.code,
                 project_root=payload.project_root,
                 project_file_path=payload.project_file_path,
+                validation_project_root=payload.validation_project_root,
+                validation_project_file_path=payload.validation_project_file_path,
+                remix_provenance=payload.remix_provenance,
             )
 
         db.commit()
@@ -235,6 +248,9 @@ def enqueue_verified_build_job(
     pdf_filename: str | None = None,
     project_root: str | None = None,
     project_file_path: str | None = None,
+    validation_project_root: str | None = None,
+    validation_project_file_path: str | None = None,
+    remix_provenance: dict[str, Any] | None = None,
     final_workspace_status: str | None = None,
 ) -> dict[str, object]:
     record = VerifiedBuildJobRecord(
@@ -248,6 +264,9 @@ def enqueue_verified_build_job(
         pdf_filename=pdf_filename,
         project_root=project_root,
         project_file_path=project_file_path,
+        validation_project_root=validation_project_root,
+        validation_project_file_path=validation_project_file_path,
+        remix_provenance=remix_provenance,
         final_workspace_status=final_workspace_status,
     )
 

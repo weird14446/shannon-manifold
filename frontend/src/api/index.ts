@@ -150,6 +150,8 @@ export interface IndexedProofSummary {
   project_slug: string | null;
   project_title: string | null;
   project_owner_slug: string | null;
+  project_file_path: string | null;
+  project_module_name: string | null;
 }
 
 export interface IndexedProofDetail extends IndexedProofSummary {
@@ -290,6 +292,19 @@ export interface ProjectModule {
   title: string;
   depth: number;
   is_entry: boolean;
+}
+
+export interface RemixProvenancePayload {
+  kind: 'theorem' | 'project_module';
+  source_document_id: number;
+  source_title: string;
+  source_label: string;
+  source_project_root?: string | null;
+  source_project_slug?: string | null;
+  source_owner_slug?: string | null;
+  source_project_file_path?: string | null;
+  source_project_module_name?: string | null;
+  pdf_linked?: boolean;
 }
 
 export interface LeanImportGraphNode {
@@ -433,6 +448,9 @@ export const uploadProofPdf = async (
     lean4_code?: string | null;
     project_root?: string | null;
     project_file_path?: string | null;
+    validation_project_root?: string | null;
+    validation_project_file_path?: string | null;
+    remix_provenance?: RemixProvenancePayload | null;
   },
 ) => {
   const formData = new FormData();
@@ -449,6 +467,15 @@ export const uploadProofPdf = async (
   }
   if (options?.project_file_path) {
     formData.append('project_file_path', options.project_file_path);
+  }
+  if (options?.validation_project_root) {
+    formData.append('validation_project_root', options.validation_project_root);
+  }
+  if (options?.validation_project_file_path) {
+    formData.append('validation_project_file_path', options.validation_project_file_path);
+  }
+  if (options?.remix_provenance) {
+    formData.append('remix_provenance', JSON.stringify(options.remix_provenance));
   }
   const response = await api.post<ProofWorkspace>('/proofs/upload-pdf', formData);
   return response.data;
@@ -688,12 +715,29 @@ export const createProjectFile = async (
   return response.data;
 };
 
+export const saveProjectFile = async (
+  projectSlug: string,
+  payload: {
+    path: string;
+    content: string;
+  },
+) => {
+  const response = await api.put<ProjectOpenResponse>(
+    `/projects/${encodeURIComponent(projectSlug)}/files`,
+    payload,
+  );
+  return response.data;
+};
+
 export const syncLeanPlaygroundToWorkspace = async (payload: {
   code: string;
   title: string;
   proof_workspace_id?: number | null;
   project_root?: string | null;
   project_file_path?: string | null;
+  validation_project_root?: string | null;
+  validation_project_file_path?: string | null;
+  remix_provenance?: RemixProvenancePayload | null;
 }) => {
   const response = await api.post<LeanWorkspaceSyncResponse>(
     '/lean-workspace/sync-playground',

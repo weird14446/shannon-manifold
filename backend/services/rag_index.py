@@ -54,29 +54,89 @@ def extract_imports_from_content(content: str) -> list[str]:
     return imports
 
 
-def build_project_metadata(
-    project_root: str | None,
-    project_file_path: str | None = None,
-) -> dict[str, Any]:
-    if not project_root:
-        return {}
+def _normalize_remix_provenance(remix_provenance: Any) -> dict[str, Any] | None:
+    if not isinstance(remix_provenance, dict):
+        return None
 
-    project_scope = project_scope_from_workspace_path(project_root)
+    normalized: dict[str, Any] = {}
+    for key, value in remix_provenance.items():
+        normalized_key = str(key).strip()
+        if not normalized_key:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            normalized[normalized_key] = value
+            continue
+        if isinstance(value, dict):
+            nested = _normalize_remix_provenance(value)
+            if nested is not None:
+                normalized[normalized_key] = nested
+            continue
+        if isinstance(value, list):
+            normalized_list = [
+                item
+                for item in value
+                if isinstance(item, (str, int, float, bool)) or item is None
+            ]
+            normalized[normalized_key] = normalized_list
+
+    return normalized or None
+
+
+def _project_scope_metadata(
+    project_root: str | None,
+    project_file_path: str | None,
+    *,
+    prefix: str,
+) -> dict[str, Any]:
+    normalized_project_root = canonicalize_project_root(project_root) if project_root else None
+    project_scope = (
+        project_scope_from_workspace_path(normalized_project_root)
+        if normalized_project_root
+        else None
+    )
     project_title = (
         title_from_slug(project_scope["project_slug"])
         if project_scope is not None
-        else title_from_slug(project_root.rsplit("/", 1)[-1])
+        else title_from_slug(normalized_project_root.rsplit("/", 1)[-1])
+        if normalized_project_root
+        else None
     )
-    metadata = {
-        "project_root": project_root,
-        "project_title": project_title,
-        "project_slug": project_scope["project_slug"] if project_scope is not None else None,
-        "owner_slug": project_scope["owner_slug"] if project_scope is not None else None,
+    normalized_project_file_path = (
+        Path(project_file_path).as_posix().lstrip("/") if project_file_path else None
+    )
+    project_module_name = (
+        module_name_from_project_path(normalized_project_file_path)
+        if normalized_project_file_path
+        else None
+    )
+
+    return {
+        f"{prefix}project_root": normalized_project_root,
+        f"{prefix}project_title": project_title,
+        f"{prefix}project_slug": project_scope["project_slug"] if project_scope is not None else None,
+        f"{prefix}owner_slug": project_scope["owner_slug"] if project_scope is not None else None,
+        f"{prefix}project_file_path": normalized_project_file_path,
+        f"{prefix}project_module_name": project_module_name,
     }
-    if project_file_path:
-        normalized_project_file_path = Path(project_file_path).as_posix().lstrip("/")
-        metadata["project_file_path"] = normalized_project_file_path
-        metadata["project_module_name"] = module_name_from_project_path(normalized_project_file_path)
+
+
+def build_project_metadata(
+    project_root: str | None,
+    project_file_path: str | None = None,
+    *,
+    validation_project_root: str | None = None,
+    validation_project_file_path: str | None = None,
+    remix_provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = {
+        **_project_scope_metadata(project_root, project_file_path, prefix=""),
+        **_project_scope_metadata(
+            validation_project_root,
+            validation_project_file_path,
+            prefix="validation_",
+        ),
+        "remix_provenance": _normalize_remix_provenance(remix_provenance),
+    }
     return metadata
 
 
@@ -688,6 +748,9 @@ async def sync_proof_workspace_to_rag(
     document: CodeDocument | None = None,
     project_root: str | None = None,
     project_file_path: str | None = None,
+    validation_project_root: str | None = None,
+    validation_project_file_path: str | None = None,
+    remix_provenance: dict[str, Any] | None = None,
 ) -> CodeDocument:
     summary_source = workspace.extracted_text or workspace.source_text or ""
     summary_text = summary_source[:3000]
@@ -705,7 +768,13 @@ async def sync_proof_workspace_to_rag(
         content=workspace.lean4_code,
         summary_text=summary_text,
         is_verified=True,
-        metadata=build_project_metadata(project_root, project_file_path),
+        metadata=build_project_metadata(
+            project_root,
+            project_file_path,
+            validation_project_root=validation_project_root,
+            validation_project_file_path=validation_project_file_path,
+            remix_provenance=remix_provenance,
+        ),
     )
     _dedupe_playground_documents_for_workspace(
         db,
@@ -730,6 +799,9 @@ async def sync_playground_document_to_rag(
     document: CodeDocument | None = None,
     project_root: str | None = None,
     project_file_path: str | None = None,
+    validation_project_root: str | None = None,
+    validation_project_file_path: str | None = None,
+    remix_provenance: dict[str, Any] | None = None,
 ) -> CodeDocument:
     return await upsert_indexed_document(
         db,
@@ -745,7 +817,13 @@ async def sync_playground_document_to_rag(
         content=content,
         summary_text=title,
         is_verified=True,
-        metadata=build_project_metadata(project_root, project_file_path),
+        metadata=build_project_metadata(
+            project_root,
+            project_file_path,
+            validation_project_root=validation_project_root,
+            validation_project_file_path=validation_project_file_path,
+            remix_provenance=remix_provenance,
+        ),
     )
 
 

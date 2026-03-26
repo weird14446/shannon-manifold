@@ -47,6 +47,10 @@ interface DiscussionPanelProps {
   onSummariesChange?: (threads: DiscussionThreadSummary[]) => void;
 }
 
+interface DiscussionCommentNode extends DiscussionComment {
+  children: DiscussionCommentNode[];
+}
+
 const formatTimestamp = (value: string) => new Date(value).toLocaleString();
 const formatCommentCount = (count: number) => `${count} comment${count === 1 ? '' : 's'}`;
 
@@ -54,6 +58,33 @@ const asNumber = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
 const asString = (value: unknown) => (typeof value === 'string' ? value : '');
+
+const buildDiscussionCommentTree = (comments: DiscussionComment[]): DiscussionCommentNode[] => {
+  const sortedComments = [...comments].sort(
+    (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+  );
+  const nodeLookup = new Map<number, DiscussionCommentNode>();
+
+  sortedComments.forEach((comment) => {
+    nodeLookup.set(comment.id, { ...comment, children: [] });
+  });
+
+  const roots: DiscussionCommentNode[] = [];
+  nodeLookup.forEach((node) => {
+    if (node.parent_id == null) {
+      roots.push(node);
+      return;
+    }
+    const parentNode = nodeLookup.get(node.parent_id);
+    if (!parentNode) {
+      roots.push(node);
+      return;
+    }
+    parentNode.children.push(node);
+  });
+
+  return roots;
+};
 
 const discussionAnchorMatches = (
   thread: DiscussionThreadSummary,
@@ -176,6 +207,11 @@ export function DiscussionPanel({
     }
     return threads.filter((thread) => discussionAnchorMatches(thread, currentAnchor));
   }, [anchorType, currentAnchor, threads]);
+
+  const selectedThreadComments = useMemo(
+    () => buildDiscussionCommentTree(selectedThread?.comments ?? []),
+    [selectedThread?.comments],
+  );
 
   useEffect(() => {
     if (visibleThreads.length === 0) {
@@ -345,6 +381,53 @@ export function DiscussionPanel({
     }
   };
 
+  const renderCommentNode = (comment: DiscussionCommentNode, depth = 0) => (
+    <div key={comment.id} className={`discussion-comment-thread ${depth > 0 ? 'is-reply-thread' : ''}`}>
+      <article className={`discussion-comment-card ${depth > 0 ? 'is-reply' : ''}`}>
+        <div className="discussion-comment-head">
+          <div>
+            <strong>{comment.author_name}</strong>
+            <div className="discussion-thread-card-meta">{formatTimestamp(comment.created_at)}</div>
+          </div>
+          <div className="discussion-comment-actions">
+            {currentUser ? (
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setReplyParent(comment)}
+              >
+                <CornerDownRight size={14} />
+                Reply
+              </button>
+            ) : null}
+            {comment.can_delete ? (
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => void handleDeleteComment(comment.id)}
+              >
+                <Trash2 size={14} />
+                Delete
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {comment.parent_author_name ? (
+          <div className="discussion-thread-card-meta discussion-comment-context">
+            <CornerDownRight size={13} />
+            Replying to {comment.parent_author_name}
+          </div>
+        ) : null}
+        <p className="discussion-comment-body">{comment.body}</p>
+      </article>
+      {comment.children.length > 0 ? (
+        <div className="discussion-comment-children">
+          {comment.children.map((child) => renderCommentNode(child, depth + 1))}
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <section className="discussion-panel-shell">
       <div className="discussion-panel-header">
@@ -510,50 +593,7 @@ export function DiscussionPanel({
                       </div>
 
                       <div className="discussion-comment-list">
-                        {selectedThread.comments.map((comment) => (
-                          <article
-                            key={comment.id}
-                            className={`discussion-comment-card ${comment.parent_id ? 'is-reply' : ''}`}
-                          >
-                            <div className="discussion-comment-head">
-                              <div>
-                                <strong>{comment.author_name}</strong>
-                                <div className="discussion-thread-card-meta">
-                                  {formatTimestamp(comment.created_at)}
-                                </div>
-                              </div>
-                              <div className="discussion-comment-actions">
-                                {currentUser ? (
-                                  <button
-                                    type="button"
-                                    className="button-secondary"
-                                    onClick={() => setReplyParent(comment)}
-                                  >
-                                    <CornerDownRight size={14} />
-                                    Reply
-                                  </button>
-                                ) : null}
-                                {comment.can_delete ? (
-                                  <button
-                                    type="button"
-                                    className="button-secondary"
-                                    onClick={() => void handleDeleteComment(comment.id)}
-                                  >
-                                    <Trash2 size={14} />
-                                    Delete
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                            {comment.parent_author_name ? (
-                              <div className="discussion-thread-card-meta discussion-comment-context">
-                                <CornerDownRight size={13} />
-                                Replying to {comment.parent_author_name}
-                              </div>
-                            ) : null}
-                            <p className="discussion-comment-body">{comment.body}</p>
-                          </article>
-                        ))}
+                        {selectedThreadComments.map((comment) => renderCommentNode(comment))}
                       </div>
 
                       {!currentUser ? (

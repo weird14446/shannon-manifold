@@ -23,6 +23,7 @@ import {
   getTheoremPdfUrl,
   type AuthUser,
   type IndexedProofDetail,
+  type RemixProvenancePayload,
   type TheoremPdfMappingItem,
   updateTheorem,
 } from '../../api';
@@ -43,6 +44,22 @@ interface VerifiedCodeViewerProps {
     title: string;
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
+    linkedPdfFilename?: string | null;
+    linkedPdfPreviewUrl?: string | null;
+    linkedPdfDownloadUrl?: string | null;
+    projectSlug?: string | null;
+    projectOwnerSlug?: string | null;
+    projectTitle?: string | null;
+    projectRoot?: string | null;
+    packageName?: string | null;
+    projectGithubUrl?: string | null;
+    projectVisibility?: 'public' | 'private' | null;
+    projectCanEdit?: boolean | null;
+    projectFilePath?: string | null;
+    projectModuleName?: string | null;
+    projectEntryFilePath?: string | null;
+    projectEntryModuleName?: string | null;
+    remixProvenance?: RemixProvenancePayload | null;
   }) => void;
 }
 
@@ -123,11 +140,35 @@ export function VerifiedCodeViewer({
       return;
     }
 
+    const remixProvenance: RemixProvenancePayload = {
+      kind: 'theorem',
+      source_document_id: detail.id,
+      source_title: detail.title,
+      source_label: `theorem #${detail.id}`,
+      source_project_root: detail.project_root,
+      source_project_slug: detail.project_slug,
+      source_owner_slug: detail.project_owner_slug,
+      source_project_file_path: detail.project_file_path,
+      source_project_module_name: detail.project_module_name,
+      pdf_linked: detail.has_pdf,
+    };
+
     onOpenPlayground({
       code: detail.content,
       title: detail.title,
-      proofWorkspaceId: detail.proof_workspace_id,
-      pdfFilename: detail.pdf_filename,
+      proofWorkspaceId: null,
+      pdfFilename: null,
+      linkedPdfFilename: detail.pdf_filename,
+      linkedPdfPreviewUrl: detail.has_pdf ? getTheoremPdfUrl(detail.id) : null,
+      linkedPdfDownloadUrl: detail.has_pdf ? getTheoremPdfUrl(detail.id, true) : null,
+      projectSlug: detail.project_slug,
+      projectOwnerSlug: detail.project_owner_slug,
+      projectTitle: detail.project_title,
+      projectRoot: detail.project_root,
+      packageName: detail.project_module_name?.split('.').at(0) ?? null,
+      projectFilePath: detail.project_file_path,
+      projectModuleName: detail.project_module_name,
+      remixProvenance,
     });
   };
 
@@ -341,7 +382,7 @@ export function VerifiedCodeViewer({
           </button>
           <button type="button" className="button-secondary" onClick={handleOpenPlayground}>
             <ExternalLink size={16} />
-            Open in Lean Playground
+            Remix to Playground
           </button>
           <button
             type="button"

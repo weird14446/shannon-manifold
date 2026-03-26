@@ -18,10 +18,12 @@ import {
   getVerifiedBuildJob,
   getLeanWorkspaceInfo,
   getTheoremDetail,
+  getTheoremPdfUrl,
   listProjectModules,
   getProofWorkspacePdfUrl,
   listProjects,
   openProject,
+  saveProjectFile,
   syncLeanPlaygroundToWorkspace,
   updateProject,
   uploadProofPdf,
@@ -31,6 +33,7 @@ import {
   type LeanWorkspaceInfo,
   type ProjectModule,
   type ProjectSummary,
+  type RemixProvenancePayload,
 } from '../../api';
 import { VerifiedModulePreviewCard } from './VerifiedModulePreviewCard';
 import 'lean4monaco/dist/css/custom.css';
@@ -53,6 +56,9 @@ export interface LeanPlaygroundSeed {
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  linkedPdfFilename?: string | null;
+  linkedPdfPreviewUrl?: string | null;
+  linkedPdfDownloadUrl?: string | null;
   projectSlug?: string | null;
   projectOwnerSlug?: string | null;
   projectTitle?: string | null;
@@ -65,6 +71,8 @@ export interface LeanPlaygroundSeed {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
+  remixProvenance?: RemixProvenancePayload | null;
+  remixSaveTarget?: RemixSaveTarget | null;
 }
 
 interface LeanPlaygroundProps {
@@ -72,6 +80,7 @@ interface LeanPlaygroundProps {
   currentUser: AuthUser | null;
   onOpenAuth: () => void;
   onLogout: () => void;
+  onSessionMetadataChange?: (metadata: PlaygroundSessionMetadata | null) => void;
   onDocumentChange?: (snapshot: ChatCodeContextPayload) => void;
   onAttachmentChange?: (file: File | null) => void;
 }
@@ -81,6 +90,9 @@ interface PlaygroundDocument {
   title: string;
   proofWorkspaceId?: number | null;
   pdfFilename?: string | null;
+  linkedPdfFilename?: string | null;
+  linkedPdfPreviewUrl?: string | null;
+  linkedPdfDownloadUrl?: string | null;
   projectSlug?: string | null;
   projectOwnerSlug?: string | null;
   projectTitle?: string | null;
@@ -93,6 +105,8 @@ interface PlaygroundDocument {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
+  remixProvenance?: RemixProvenancePayload | null;
+  remixSaveTarget?: RemixSaveTarget | null;
 }
 
 interface CursorSnapshot {
@@ -107,6 +121,57 @@ interface PendingVerifiedSaveSnapshot {
   pdfFilename: string | null;
   projectFilePath: string | null;
   projectModuleName: string | null;
+}
+
+interface RemixSaveTargetProject {
+  kind: 'project';
+  target_project_slug: string;
+  target_project_owner_slug: string;
+  target_project_title: string;
+  target_project_root: string;
+  target_project_file_path: string;
+  target_project_module_name: string;
+  validation_project_root: string;
+  validation_project_file_path: string;
+}
+
+interface RemixSaveTargetScratch {
+  kind: 'scratch';
+  validation_project_root: string | null;
+  validation_project_file_path: string | null;
+}
+
+type RemixSaveTarget = RemixSaveTargetProject | RemixSaveTargetScratch;
+
+interface PlaygroundSessionMetadata {
+  title: string;
+  proofWorkspaceId?: number | null;
+  pdfFilename?: string | null;
+  linkedPdfFilename?: string | null;
+  linkedPdfPreviewUrl?: string | null;
+  linkedPdfDownloadUrl?: string | null;
+  projectSlug?: string | null;
+  projectOwnerSlug?: string | null;
+  projectTitle?: string | null;
+  projectRoot?: string | null;
+  packageName?: string | null;
+  projectGithubUrl?: string | null;
+  projectVisibility?: 'public' | 'private' | null;
+  projectCanEdit?: boolean | null;
+  projectFilePath?: string | null;
+  projectModuleName?: string | null;
+  projectEntryFilePath?: string | null;
+  projectEntryModuleName?: string | null;
+  remixProvenance?: RemixProvenancePayload | null;
+  remixSaveTarget?: RemixSaveTarget | null;
+}
+
+interface RemixSaveDraftState {
+  mode: 'scratch' | 'project';
+  projectKey: string;
+  fileTitle: string;
+  overwriteConfirmed: boolean;
+  conflictMessage: string | null;
 }
 
 const toEditorModelPath = (workspacePath: string) => `/${workspacePath.replace(/^\/+/, '')}`;
@@ -298,6 +363,9 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       title: seed.title,
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
+      linkedPdfFilename: seed.linkedPdfFilename ?? null,
+      linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+      linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
       projectSlug: seed.projectSlug ?? null,
       projectOwnerSlug: seed.projectOwnerSlug ?? null,
       projectTitle: seed.projectTitle ?? null,
@@ -310,6 +378,8 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       projectModuleName: seed.projectModuleName ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
       projectEntryModuleName: seed.projectEntryModuleName ?? null,
+      remixProvenance: seed.remixProvenance ?? null,
+      remixSaveTarget: seed.remixSaveTarget ?? null,
     };
   }
 
@@ -319,6 +389,11 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       title: seed.title,
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
+      linkedPdfFilename: seed.linkedPdfFilename ?? null,
+      linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+      linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
+      remixProvenance: seed.remixProvenance ?? null,
+      remixSaveTarget: seed.remixSaveTarget ?? null,
     };
   }
 
@@ -443,6 +518,7 @@ export function LeanPlayground({
   currentUser,
   onOpenAuth,
   onLogout,
+  onSessionMetadataChange,
   onDocumentChange,
   onAttachmentChange,
 }: LeanPlaygroundProps) {
@@ -451,7 +527,7 @@ export function LeanPlayground({
   const [currentCode, setCurrentCode] = useState(initialDocument.code);
   const [currentTitle, setCurrentTitle] = useState(initialDocument.title);
   const [documentSource, setDocumentSource] = useState<string>(
-    seed?.code ? 'workspace' : sharedDocument ? 'shared' : 'local',
+    initialDocument.remixProvenance ? 'remix' : seed?.code ? 'workspace' : sharedDocument ? 'shared' : 'local',
   );
   const [editorStatus, setEditorStatus] = useState<'booting' | 'ready' | 'error'>('booting');
   const [editorError, setEditorError] = useState('');
@@ -517,12 +593,36 @@ export function LeanPlayground({
   const [attachedPdfFilename, setAttachedPdfFilename] = useState<string | null>(
     initialDocument.pdfFilename ?? null,
   );
+  const [linkedPdfFilename, setLinkedPdfFilename] = useState<string | null>(
+    initialDocument.linkedPdfFilename ?? null,
+  );
+  const [linkedPdfPreviewUrl, setLinkedPdfPreviewUrl] = useState<string | null>(
+    initialDocument.linkedPdfPreviewUrl ?? null,
+  );
+  const [linkedPdfDownloadUrl, setLinkedPdfDownloadUrl] = useState<string | null>(
+    initialDocument.linkedPdfDownloadUrl ?? null,
+  );
   const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
   const [pendingPdfPreviewUrl, setPendingPdfPreviewUrl] = useState<string | null>(null);
   const [isUploadingToDatabase, setIsUploadingToDatabase] = useState(false);
   const [activeBuildJobId, setActiveBuildJobId] = useState<string | null>(null);
   const [activeBuildJobStatus, setActiveBuildJobStatus] = useState<string | null>(null);
   const [pendingVerifiedSave, setPendingVerifiedSave] = useState<PendingVerifiedSaveSnapshot | null>(null);
+  const [remixProvenance, setRemixProvenance] = useState<RemixProvenancePayload | null>(
+    initialDocument.remixProvenance ?? null,
+  );
+  const [remixSaveTarget, setRemixSaveTarget] = useState<RemixSaveTarget | null>(
+    initialDocument.remixSaveTarget ?? null,
+  );
+  const [isRemixSaveModalOpen, setIsRemixSaveModalOpen] = useState(false);
+  const [isSubmittingRemixSave, setIsSubmittingRemixSave] = useState(false);
+  const [remixSaveDraft, setRemixSaveDraft] = useState<RemixSaveDraftState>({
+    mode: 'scratch',
+    projectKey: '',
+    fileTitle: initialDocument.title,
+    overwriteConfirmed: false,
+    conflictMessage: null,
+  });
   const editorModelPath = toEditorModelPath(savedWorkspacePath);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -549,6 +649,10 @@ export function LeanPlayground({
   const projectSelectionValue = activeProjectSlug
     ? `${activeProjectOwnerSlug ?? ''}:${activeProjectSlug}`
     : '';
+  const ownedProjects = useMemo(
+    () => availableProjects.filter((project) => project.can_edit),
+    [availableProjects],
+  );
   const selectableProjects = useMemo(() => {
     const ownedProjects = availableProjects.filter((project) => project.can_edit);
     if (
@@ -693,6 +797,9 @@ export function LeanPlayground({
           title: currentTitle,
           proofWorkspaceId: activeProofWorkspaceId,
           pdfFilename: attachedPdfFilename,
+          linkedPdfFilename,
+          linkedPdfPreviewUrl,
+          linkedPdfDownloadUrl,
           projectSlug: activeProjectSlug,
           projectOwnerSlug: activeProjectOwnerSlug,
           projectTitle: activeProjectTitle,
@@ -705,6 +812,8 @@ export function LeanPlayground({
           projectModuleName: savedWorkspaceModule,
           projectEntryFilePath: activeProjectEntryFilePath,
           projectEntryModuleName: activeProjectEntryModuleName,
+          remixProvenance,
+          remixSaveTarget,
         }),
       );
     }, 250);
@@ -725,6 +834,58 @@ export function LeanPlayground({
     attachedPdfFilename,
     currentCode,
     currentTitle,
+    linkedPdfDownloadUrl,
+    linkedPdfFilename,
+    linkedPdfPreviewUrl,
+    remixProvenance,
+    remixSaveTarget,
+    savedWorkspaceModule,
+    savedWorkspacePath,
+  ]);
+
+  useEffect(() => {
+    onSessionMetadataChange?.({
+      title: currentTitle,
+      proofWorkspaceId: activeProofWorkspaceId,
+      pdfFilename: attachedPdfFilename,
+      linkedPdfFilename,
+      linkedPdfPreviewUrl,
+      linkedPdfDownloadUrl,
+      projectSlug: activeProjectSlug,
+      projectOwnerSlug: activeProjectOwnerSlug,
+      projectTitle: activeProjectTitle,
+      projectRoot: activeProjectRoot,
+      packageName: activeProjectPackageName,
+      projectGithubUrl: activeProjectGithubUrl,
+      projectVisibility: activeProjectVisibility,
+      projectCanEdit: activeProjectCanEdit,
+      projectFilePath: savedWorkspacePath,
+      projectModuleName: savedWorkspaceModule,
+      projectEntryFilePath: activeProjectEntryFilePath,
+      projectEntryModuleName: activeProjectEntryModuleName,
+      remixProvenance,
+      remixSaveTarget,
+    });
+  }, [
+    activeProofWorkspaceId,
+    activeProjectCanEdit,
+    activeProjectEntryFilePath,
+    activeProjectEntryModuleName,
+    activeProjectGithubUrl,
+    activeProjectOwnerSlug,
+    activeProjectPackageName,
+    activeProjectRoot,
+    activeProjectSlug,
+    activeProjectTitle,
+    activeProjectVisibility,
+    attachedPdfFilename,
+    currentTitle,
+    linkedPdfDownloadUrl,
+    linkedPdfFilename,
+    linkedPdfPreviewUrl,
+    onSessionMetadataChange,
+    remixProvenance,
+    remixSaveTarget,
     savedWorkspaceModule,
     savedWorkspacePath,
   ]);
@@ -1174,9 +1335,12 @@ export function LeanPlayground({
     applyDocument({
       code: seed.code,
       title: seed.title,
-      source: seed.projectSlug ? 'project' : 'workspace',
+      source: seed.remixProvenance ? 'remix' : seed.projectSlug ? 'project' : 'workspace',
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
+      linkedPdfFilename: seed.linkedPdfFilename ?? null,
+      linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+      linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
       workspacePath: seed.projectFilePath ?? savedWorkspacePath,
       workspaceModule: seed.projectModuleName ?? savedWorkspaceModule,
       projectSlug: seed.projectSlug ?? null,
@@ -1189,11 +1353,16 @@ export function LeanPlayground({
       projectCanEdit: seed.projectCanEdit ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
       projectEntryModuleName: seed.projectEntryModuleName ?? null,
+      remixProvenance: seed.remixProvenance ?? null,
+      remixSaveTarget: seed.remixSaveTarget ?? null,
     });
   }, [
     savedWorkspaceModule,
     savedWorkspacePath,
     seed?.code,
+    seed?.linkedPdfDownloadUrl,
+    seed?.linkedPdfFilename,
+    seed?.linkedPdfPreviewUrl,
     seed?.packageName,
     seed?.pdfFilename,
     seed?.projectEntryFilePath,
@@ -1208,6 +1377,8 @@ export function LeanPlayground({
     seed?.projectTitle,
     seed?.projectVisibility,
     seed?.proofWorkspaceId,
+    seed?.remixProvenance,
+    seed?.remixSaveTarget,
     seed?.revision,
     seed?.title,
   ]);
@@ -1237,7 +1408,7 @@ export function LeanPlayground({
         applyDocument({
           code: project.content,
           title: project.workspace_title,
-          source: 'project',
+          source: seed.remixProvenance ? 'remix' : 'project',
           workspacePath: project.workspace_file_path,
           workspaceModule: project.workspace_module_name,
           projectSlug: project.slug,
@@ -1250,6 +1421,11 @@ export function LeanPlayground({
           projectCanEdit: project.can_edit,
           projectEntryFilePath: project.entry_file_path,
           projectEntryModuleName: project.entry_module_name,
+          linkedPdfFilename: seed.linkedPdfFilename ?? null,
+          linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
+          linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
+          remixProvenance: seed.remixProvenance ?? null,
+          remixSaveTarget: seed.remixSaveTarget ?? null,
         });
       } catch (error: any) {
         if (!isMounted) {
@@ -1277,9 +1453,14 @@ export function LeanPlayground({
     onLogout,
     onOpenAuth,
     seed?.code,
+    seed?.linkedPdfDownloadUrl,
+    seed?.linkedPdfFilename,
+    seed?.linkedPdfPreviewUrl,
     seed?.projectFilePath,
     seed?.projectOwnerSlug,
     seed?.projectSlug,
+    seed?.remixProvenance,
+    seed?.remixSaveTarget,
     seed?.revision,
   ]);
 
@@ -1289,6 +1470,9 @@ export function LeanPlayground({
     source,
     proofWorkspaceId = null,
     pdfFilename: _pdfFilename = null,
+    linkedPdfFilename: nextLinkedPdfFilename = null,
+    linkedPdfPreviewUrl: nextLinkedPdfPreviewUrl = null,
+    linkedPdfDownloadUrl: nextLinkedPdfDownloadUrl = null,
     workspacePath = savedWorkspacePath,
     workspaceModule = savedWorkspaceModule,
     projectSlug = null,
@@ -1301,12 +1485,17 @@ export function LeanPlayground({
     projectCanEdit = null,
     projectEntryFilePath = null,
     projectEntryModuleName = null,
+    remixProvenance: nextRemixProvenance = null,
+    remixSaveTarget: nextRemixSaveTarget = null,
   }: {
     code: string;
     title: string;
     source: string;
     proofWorkspaceId?: number | null;
     pdfFilename?: string | null;
+    linkedPdfFilename?: string | null;
+    linkedPdfPreviewUrl?: string | null;
+    linkedPdfDownloadUrl?: string | null;
     workspacePath?: string;
     workspaceModule?: string;
     projectSlug?: string | null;
@@ -1319,6 +1508,8 @@ export function LeanPlayground({
     projectCanEdit?: boolean | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
+    remixProvenance?: RemixProvenancePayload | null;
+    remixSaveTarget?: RemixSaveTarget | null;
   }) => {
     setPreviewModuleDetail(null);
     setPreviewModuleError('');
@@ -1342,11 +1533,19 @@ export function LeanPlayground({
     setActiveProjectEntryFilePath(projectEntryFilePath);
     setActiveProjectEntryModuleName(projectEntryModuleName);
     setAttachedPdfFilename(_pdfFilename);
+    setLinkedPdfFilename(nextLinkedPdfFilename);
+    setLinkedPdfPreviewUrl(nextLinkedPdfPreviewUrl);
+    setLinkedPdfDownloadUrl(nextLinkedPdfDownloadUrl);
+    setRemixProvenance(nextRemixProvenance);
+    setRemixSaveTarget(nextRemixSaveTarget);
     setBaselineDocument({
       code,
       title,
       proofWorkspaceId,
       pdfFilename: _pdfFilename,
+      linkedPdfFilename: nextLinkedPdfFilename,
+      linkedPdfPreviewUrl: nextLinkedPdfPreviewUrl,
+      linkedPdfDownloadUrl: nextLinkedPdfDownloadUrl,
       projectSlug,
       projectOwnerSlug,
       projectTitle,
@@ -1359,6 +1558,8 @@ export function LeanPlayground({
       projectModuleName: workspaceModule,
       projectEntryFilePath,
       projectEntryModuleName,
+      remixProvenance: nextRemixProvenance,
+      remixSaveTarget: nextRemixSaveTarget,
     });
     setShareState('idle');
 
@@ -1381,9 +1582,16 @@ export function LeanPlayground({
     applyDocument({
       code: baselineDocument.code,
       title: baselineDocument.title,
-      source: documentSource,
+      source: baselineDocument.remixProvenance
+        ? 'remix'
+        : baselineDocument.projectSlug
+          ? 'project'
+          : documentSource,
       proofWorkspaceId: baselineDocument.proofWorkspaceId ?? null,
       pdfFilename: baselineDocument.pdfFilename ?? null,
+      linkedPdfFilename: baselineDocument.linkedPdfFilename ?? null,
+      linkedPdfPreviewUrl: baselineDocument.linkedPdfPreviewUrl ?? null,
+      linkedPdfDownloadUrl: baselineDocument.linkedPdfDownloadUrl ?? null,
       workspacePath: baselineDocument.projectFilePath ?? savedWorkspacePath,
       workspaceModule: baselineDocument.projectModuleName ?? savedWorkspaceModule,
       projectSlug: baselineDocument.projectSlug ?? null,
@@ -1396,6 +1604,8 @@ export function LeanPlayground({
       projectCanEdit: baselineDocument.projectCanEdit ?? null,
       projectEntryFilePath: baselineDocument.projectEntryFilePath ?? null,
       projectEntryModuleName: baselineDocument.projectEntryModuleName ?? null,
+      remixProvenance: baselineDocument.remixProvenance ?? null,
+      remixSaveTarget: baselineDocument.remixSaveTarget ?? null,
     });
   };
 
@@ -1549,125 +1759,235 @@ export function LeanPlayground({
     }
   };
 
-  const handleUploadToVerifiedDatabase = async () => {
-    if (!currentUser) {
-      onOpenAuth();
+  const handleRemixPreviewModule = () => {
+    if (!previewModuleDetail) {
       return;
     }
 
-    setIsUploadingToDatabase(true);
-    setWorkspaceNotice('');
+    const packageNameFromModule =
+      previewModuleDetail.project_module_name?.split('.').at(0) ?? null;
+    const sourceProjectLabel =
+      previewModuleDetail.project_owner_slug && previewModuleDetail.project_slug
+        ? `${previewModuleDetail.project_owner_slug}/${previewModuleDetail.project_slug}`
+        : `module #${previewModuleDetail.id}`;
+    const nextRemixProvenance: RemixProvenancePayload = {
+      kind: 'project_module',
+      source_document_id: previewModuleDetail.id,
+      source_title: previewModuleDetail.title,
+      source_label: sourceProjectLabel,
+      source_project_root: previewModuleDetail.project_root,
+      source_project_slug: previewModuleDetail.project_slug,
+      source_owner_slug: previewModuleDetail.project_owner_slug,
+      source_project_file_path: previewModuleDetail.project_file_path,
+      source_project_module_name: previewModuleDetail.project_module_name,
+      pdf_linked: previewModuleDetail.has_pdf,
+    };
 
-    try {
-      const preparedProjectTarget = activeProjectSlug ? commitProjectFileName(currentTitle) : null;
-      if (pendingPdfFile) {
-        const fallbackTitle = pendingPdfFile.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
-        const normalizedTitle =
-          activeProjectSlug && preparedProjectTarget
-            ? preparedProjectTarget.title
-            : currentTitle.trim() && currentTitle.trim() !== DEFAULT_DOCUMENT.title
-            ? currentTitle.trim()
-            : fallbackTitle;
-        const workspace = await uploadProofPdf(normalizedTitle, pendingPdfFile, {
-          workspace_id: activeProofWorkspaceId,
-          lean4_code: hasMeaningfulLeanCode(currentCode) ? currentCode : null,
-          project_root: activeProjectRoot,
-          project_file_path: savedWorkspacePath,
-        });
-        const nextTitle = activeProjectSlug ? currentTitle : workspace.title;
-        const nextCode =
-          activeProjectSlug || hasMeaningfulLeanCode(currentCode)
-            ? currentCode
-            : workspace.lean4_code;
-        const nextPdfFilename = workspace.pdf_filename ?? workspace.source_filename ?? pendingPdfFile.name;
+    replacePendingPdf(null);
+    applyDocument({
+      code: previewModuleDetail.content,
+      title: previewModuleDetail.title,
+      source: 'remix',
+      proofWorkspaceId: null,
+      pdfFilename: null,
+      linkedPdfFilename: previewModuleDetail.pdf_filename,
+      linkedPdfPreviewUrl: previewModuleDetail.has_pdf
+        ? getTheoremPdfUrl(previewModuleDetail.id)
+        : null,
+      linkedPdfDownloadUrl: previewModuleDetail.has_pdf
+        ? getTheoremPdfUrl(previewModuleDetail.id, true)
+        : null,
+      workspacePath: previewModuleDetail.project_file_path ?? savedWorkspacePath,
+      workspaceModule: previewModuleDetail.project_module_name ?? savedWorkspaceModule,
+      projectSlug: previewModuleDetail.project_slug,
+      projectOwnerSlug: previewModuleDetail.project_owner_slug,
+      projectTitle: previewModuleDetail.project_title,
+      projectRoot: previewModuleDetail.project_root,
+      packageName: packageNameFromModule,
+      remixProvenance: nextRemixProvenance,
+      remixSaveTarget: null,
+    });
+    setPreviewModuleDetail(null);
+    setPreviewModuleError('');
+    setPreviewModulePath(null);
+  };
 
-        replacePendingPdf(null);
-        setAttachedPdfFilename(nextPdfFilename);
-        setActiveProofWorkspaceId(workspace.id);
-        if (!activeProjectSlug) {
-          setCurrentTitle(nextTitle);
-          setCurrentCode(nextCode);
-          latestCodeRef.current = nextCode;
-          const model = leanEditorRef.current?.editor?.getModel();
-          if (model && model.getValue() !== nextCode) {
-            applyingExternalCodeRef.current = true;
-            try {
-              model.setValue(nextCode);
-            } finally {
-              applyingExternalCodeRef.current = false;
-            }
+  const resolveDefaultRemixProjectKey = () => {
+    const activeOwnedProject = ownedProjects.find(
+      (project) =>
+        project.slug === activeProjectSlug && project.owner_slug === activeProjectOwnerSlug,
+    );
+    const fallbackProject = activeOwnedProject ?? ownedProjects[0];
+    return fallbackProject ? `${fallbackProject.owner_slug}:${fallbackProject.slug}` : '';
+  };
+
+  const openRemixSaveModal = () => {
+    setRemixSaveDraft({
+      mode: 'scratch',
+      projectKey: resolveDefaultRemixProjectKey(),
+      fileTitle: currentTitle,
+      overwriteConfirmed: false,
+      conflictMessage: null,
+    });
+    setIsRemixSaveModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!isRemixSaveModalOpen || remixSaveDraft.projectKey || ownedProjects.length === 0) {
+      return;
+    }
+
+    setRemixSaveDraft((current) => ({
+      ...current,
+      projectKey: resolveDefaultRemixProjectKey(),
+    }));
+  }, [isRemixSaveModalOpen, ownedProjects, remixSaveDraft.projectKey]);
+
+  const resolveRemixValidationContext = (target: RemixSaveTarget | null) => {
+    if (target?.kind === 'project') {
+      return {
+        validationProjectRoot: target.validation_project_root,
+        validationProjectFilePath: target.validation_project_file_path,
+      };
+    }
+    if (target?.kind === 'scratch') {
+      return {
+        validationProjectRoot: target.validation_project_root,
+        validationProjectFilePath: target.validation_project_file_path,
+      };
+    }
+
+    return {
+      validationProjectRoot: activeProjectRoot,
+      validationProjectFilePath: activeProjectRoot ? savedWorkspacePath : null,
+    };
+  };
+
+  const applyProjectContextFromOpenResponse = (project: {
+    slug: string;
+    owner_slug: string;
+    title: string;
+    project_root: string;
+    package_name: string;
+    github_url: string | null;
+    visibility: 'public' | 'private';
+    can_edit: boolean;
+    entry_file_path: string;
+    entry_module_name: string;
+  }) => {
+    setActiveProjectSlug(project.slug);
+    setActiveProjectOwnerSlug(project.owner_slug);
+    setActiveProjectTitle(project.title);
+    setActiveProjectRoot(project.project_root);
+    setActiveProjectPackageName(project.package_name);
+    setActiveProjectGithubUrl(project.github_url);
+    setActiveProjectVisibility(project.visibility);
+    setActiveProjectCanEdit(project.can_edit);
+    setProjectGithubUrlDraft(project.github_url ?? '');
+    setActiveProjectEntryFilePath(project.entry_file_path);
+    setActiveProjectEntryModuleName(project.entry_module_name);
+  };
+
+  const performVerifiedDatabaseSave = async (
+    resolvedRemixSaveTarget: RemixSaveTarget | null,
+    options?: {
+      overrideTitle?: string;
+      overrideWorkspacePath?: string | null;
+      overrideWorkspaceModule?: string | null;
+    },
+  ) => {
+    const effectiveTitleInput = options?.overrideTitle ?? currentTitle;
+    const preparedProjectTarget =
+      !resolvedRemixSaveTarget && activeProjectSlug ? commitProjectFileName(effectiveTitleInput) : null;
+    const effectiveTitle =
+      resolvedRemixSaveTarget?.kind === 'project'
+        ? ((options?.overrideTitle ?? currentTitle.trim()) || DEFAULT_DOCUMENT.title)
+        : activeProjectSlug && preparedProjectTarget
+          ? preparedProjectTarget.title
+          : currentTitle.trim() || DEFAULT_DOCUMENT.title;
+
+    const targetProjectRoot =
+      resolvedRemixSaveTarget?.kind === 'project'
+        ? resolvedRemixSaveTarget.target_project_root
+        : remixProvenance
+          ? null
+          : activeProjectRoot;
+    const targetProjectFilePath =
+      resolvedRemixSaveTarget?.kind === 'project'
+        ? resolvedRemixSaveTarget.target_project_file_path
+        : remixProvenance
+          ? null
+          : activeProjectSlug
+            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+            : null;
+    const targetProjectModuleName =
+      resolvedRemixSaveTarget?.kind === 'project'
+        ? resolvedRemixSaveTarget.target_project_module_name
+        : remixProvenance
+          ? null
+          : activeProjectSlug
+            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
+            : null;
+    const { validationProjectRoot, validationProjectFilePath } =
+      resolveRemixValidationContext(resolvedRemixSaveTarget);
+
+    if (pendingPdfFile) {
+      const fallbackTitle = pendingPdfFile.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
+      const normalizedTitle =
+        effectiveTitle.trim() && effectiveTitle.trim() !== DEFAULT_DOCUMENT.title
+          ? effectiveTitle.trim()
+          : fallbackTitle;
+      const workspace = await uploadProofPdf(normalizedTitle, pendingPdfFile, {
+        workspace_id: activeProofWorkspaceId,
+        lean4_code: hasMeaningfulLeanCode(currentCode) ? currentCode : null,
+        project_root: targetProjectRoot,
+        project_file_path: targetProjectFilePath,
+        validation_project_root: validationProjectRoot,
+        validation_project_file_path: validationProjectFilePath,
+        remix_provenance: remixProvenance,
+      });
+      const nextTitle =
+        activeProjectSlug || resolvedRemixSaveTarget?.kind === 'project'
+          ? effectiveTitle
+          : workspace.title;
+      const nextCode =
+        activeProjectSlug || resolvedRemixSaveTarget?.kind === 'project' || hasMeaningfulLeanCode(currentCode)
+          ? currentCode
+          : workspace.lean4_code;
+      const nextPdfFilename =
+        workspace.pdf_filename ?? workspace.source_filename ?? pendingPdfFile.name;
+
+      replacePendingPdf(null);
+      setAttachedPdfFilename(nextPdfFilename);
+      setActiveProofWorkspaceId(workspace.id);
+      if (!activeProjectSlug && resolvedRemixSaveTarget?.kind !== 'project') {
+        setCurrentTitle(nextTitle);
+        setCurrentCode(nextCode);
+        latestCodeRef.current = nextCode;
+        const model = leanEditorRef.current?.editor?.getModel();
+        if (model && model.getValue() !== nextCode) {
+          applyingExternalCodeRef.current = true;
+          try {
+            model.setValue(nextCode);
+          } finally {
+            applyingExternalCodeRef.current = false;
           }
         }
-        const queuedSnapshot: PendingVerifiedSaveSnapshot = {
-          code: nextCode,
-          title: nextTitle,
-          proofWorkspaceId: workspace.id,
-          pdfFilename: nextPdfFilename,
-          projectFilePath: activeProjectSlug
-            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
-            : baselineDocument.projectFilePath ?? null,
-          projectModuleName: activeProjectSlug
-            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
-            : baselineDocument.projectModuleName ?? null,
-        };
-        if (workspace.build_job_id) {
-          setPendingVerifiedSave(queuedSnapshot);
-          setActiveBuildJobId(workspace.build_job_id);
-          setActiveBuildJobStatus(workspace.build_status ?? 'queued');
-          publishWorkspaceNotice(
-            'Uploaded the current Lean code and attached PDF. Lean build and verified database sync are running in the background.',
-            'success',
-          );
-        } else {
-          setBaselineDocument((current) => ({
-            ...current,
-            ...queuedSnapshot,
-          }));
-          publishWorkspaceNotice(
-            'Uploaded the current Lean code and attached PDF to the verified database. Open the entry there to inspect the split view.',
-            'success',
-          );
-        }
-        return;
       }
-
-      const normalizedTitle = activeProjectSlug && preparedProjectTarget
-        ? preparedProjectTarget.title
-        : currentTitle.trim() || DEFAULT_DOCUMENT.title;
-      const response = await syncLeanPlaygroundToWorkspace({
-        code: currentCode,
-        title: normalizedTitle,
-        proof_workspace_id: activeProofWorkspaceId,
-        project_root: activeProjectRoot,
-        project_file_path: savedWorkspacePath,
-      });
-
-      setWorkspaceInfo(response);
-      if (!activeProjectSlug) {
-        setSavedWorkspacePath(response.saved_path);
-        setSavedWorkspaceModule(response.saved_module);
-      }
-      setActiveProofWorkspaceId(response.proof_workspace_id ?? activeProofWorkspaceId);
-      setAttachedPdfFilename(response.pdf_filename ?? attachedPdfFilename ?? null);
-      leanMonacoRef.current?.restart();
       const queuedSnapshot: PendingVerifiedSaveSnapshot = {
-        code: currentCode,
-        title: normalizedTitle,
-        proofWorkspaceId: response.proof_workspace_id ?? activeProofWorkspaceId ?? null,
-        pdfFilename: response.pdf_filename ?? attachedPdfFilename ?? null,
-        projectFilePath: activeProjectSlug
-          ? (preparedProjectTarget?.path ?? savedWorkspacePath)
-          : baselineDocument.projectFilePath ?? null,
-        projectModuleName: activeProjectSlug
-          ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
-          : baselineDocument.projectModuleName ?? null,
+        code: nextCode,
+        title: nextTitle,
+        proofWorkspaceId: workspace.id,
+        pdfFilename: nextPdfFilename,
+        projectFilePath: targetProjectFilePath,
+        projectModuleName: targetProjectModuleName,
       };
-      if (response.build_job_id) {
+      if (workspace.build_job_id) {
         setPendingVerifiedSave(queuedSnapshot);
-        setActiveBuildJobId(response.build_job_id);
-        setActiveBuildJobStatus(response.build_status ?? 'queued');
+        setActiveBuildJobId(workspace.build_job_id);
+        setActiveBuildJobStatus(workspace.build_status ?? 'queued');
         publishWorkspaceNotice(
-          'Saved the current Lean code locally. Lean build and verified database sync are running in the background.',
+          'Uploaded the current Lean code and attached PDF. Lean build and verified database sync are running in the background.',
           'success',
         );
       } else {
@@ -1676,12 +1996,212 @@ export function LeanPlayground({
           ...queuedSnapshot,
         }));
         publishWorkspaceNotice(
-          response.pdf_filename
-            ? 'Updated the verified database entry and kept the linked PDF. The detail page will render both in split view.'
-            : 'Saved the current Lean code to the verified database.',
+          'Uploaded the current Lean code and attached PDF to the verified database. Open the entry there to inspect the split view.',
           'success',
         );
       }
+      return;
+    }
+
+    const response = await syncLeanPlaygroundToWorkspace({
+      code: currentCode,
+      title: effectiveTitle,
+      proof_workspace_id: activeProofWorkspaceId,
+      project_root: targetProjectRoot,
+      project_file_path: targetProjectFilePath,
+      validation_project_root: validationProjectRoot,
+      validation_project_file_path: validationProjectFilePath,
+      remix_provenance: remixProvenance,
+    });
+
+    setWorkspaceInfo(response);
+    if (!activeProjectSlug && resolvedRemixSaveTarget?.kind !== 'project') {
+      setSavedWorkspacePath(response.saved_path);
+      setSavedWorkspaceModule(response.saved_module);
+    } else if (options?.overrideWorkspacePath && options?.overrideWorkspaceModule) {
+      setSavedWorkspacePath(options.overrideWorkspacePath);
+      setSavedWorkspaceModule(options.overrideWorkspaceModule);
+    }
+    setActiveProofWorkspaceId(response.proof_workspace_id ?? activeProofWorkspaceId);
+    setAttachedPdfFilename(response.pdf_filename ?? attachedPdfFilename ?? null);
+    leanMonacoRef.current?.restart();
+    const queuedSnapshot: PendingVerifiedSaveSnapshot = {
+      code: currentCode,
+      title: effectiveTitle,
+      proofWorkspaceId: response.proof_workspace_id ?? activeProofWorkspaceId ?? null,
+      pdfFilename: response.pdf_filename ?? attachedPdfFilename ?? null,
+      projectFilePath: targetProjectFilePath,
+      projectModuleName: targetProjectModuleName,
+    };
+    if (response.build_job_id) {
+      setPendingVerifiedSave(queuedSnapshot);
+      setActiveBuildJobId(response.build_job_id);
+      setActiveBuildJobStatus(response.build_status ?? 'queued');
+      publishWorkspaceNotice(
+        'Saved the current Lean code locally. Lean build and verified database sync are running in the background.',
+        'success',
+      );
+    } else {
+      setBaselineDocument((current) => ({
+        ...current,
+        ...queuedSnapshot,
+      }));
+      publishWorkspaceNotice(
+        response.pdf_filename
+          ? 'Updated the verified database entry and kept the linked PDF. The detail page will render both in split view.'
+          : 'Saved the current Lean code to the verified database.',
+        'success',
+      );
+    }
+  };
+
+  const handleConfirmRemixSaveTarget = async () => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+
+    setIsSubmittingRemixSave(true);
+    setWorkspaceNotice('');
+
+    try {
+      if (remixSaveDraft.mode === 'scratch') {
+        const target: RemixSaveTargetScratch = {
+          kind: 'scratch',
+          validation_project_root: remixProvenance?.source_project_root ?? null,
+          validation_project_file_path: remixProvenance?.source_project_file_path ?? null,
+        };
+        setRemixSaveTarget(target);
+        setBaselineDocument((current) => ({
+          ...current,
+          remixSaveTarget: target,
+          remixProvenance,
+          linkedPdfFilename,
+          linkedPdfPreviewUrl,
+          linkedPdfDownloadUrl,
+        }));
+        setIsRemixSaveModalOpen(false);
+        await performVerifiedDatabaseSave(target);
+        return;
+      }
+
+      const selectedProject = ownedProjects.find(
+        (project) => `${project.owner_slug}:${project.slug}` === remixSaveDraft.projectKey,
+      );
+      if (!selectedProject) {
+        setRemixSaveDraft((current) => ({
+          ...current,
+          conflictMessage: 'Pick one of your projects before saving this remix.',
+        }));
+        return;
+      }
+
+      const nextTarget = resolveProjectWorkspaceTarget(
+        selectedProject.package_name,
+        remixSaveDraft.fileTitle,
+        selectedProject.entry_file_path,
+      );
+
+      try {
+        await openProject(selectedProject.slug, nextTarget.path, selectedProject.owner_slug);
+        if (!remixSaveDraft.overwriteConfirmed) {
+          setRemixSaveDraft((current) => ({
+            ...current,
+            fileTitle: nextTarget.title,
+            conflictMessage: `\`${nextTarget.path}\` already exists in ${selectedProject.title}. Confirm overwrite to continue.`,
+          }));
+          return;
+        }
+      } catch (probeError: any) {
+        if (probeError?.response?.status !== 404) {
+          throw probeError;
+        }
+      }
+
+      const savedProjectFile = await saveProjectFile(selectedProject.slug, {
+        path: nextTarget.path,
+        content: currentCode,
+      });
+      const target: RemixSaveTargetProject = {
+        kind: 'project',
+        target_project_slug: savedProjectFile.slug,
+        target_project_owner_slug: savedProjectFile.owner_slug,
+        target_project_title: savedProjectFile.title,
+        target_project_root: savedProjectFile.project_root,
+        target_project_file_path: savedProjectFile.workspace_file_path,
+        target_project_module_name: savedProjectFile.workspace_module_name,
+        validation_project_root: savedProjectFile.project_root,
+        validation_project_file_path: savedProjectFile.workspace_file_path,
+      };
+
+      setCurrentTitle(savedProjectFile.workspace_title);
+      applyProjectContextFromOpenResponse(savedProjectFile);
+      setSavedWorkspacePath(savedProjectFile.workspace_file_path);
+      setSavedWorkspaceModule(savedProjectFile.workspace_module_name);
+      setDocumentSource('remix');
+      setRemixSaveTarget(target);
+      setBaselineDocument((current) => ({
+        ...current,
+        title: savedProjectFile.workspace_title,
+        projectSlug: savedProjectFile.slug,
+        projectOwnerSlug: savedProjectFile.owner_slug,
+        projectTitle: savedProjectFile.title,
+        projectRoot: savedProjectFile.project_root,
+        packageName: savedProjectFile.package_name,
+        projectGithubUrl: savedProjectFile.github_url,
+        projectVisibility: savedProjectFile.visibility,
+        projectCanEdit: savedProjectFile.can_edit,
+        projectFilePath: savedProjectFile.workspace_file_path,
+        projectModuleName: savedProjectFile.workspace_module_name,
+        projectEntryFilePath: savedProjectFile.entry_file_path,
+        projectEntryModuleName: savedProjectFile.entry_module_name,
+        remixSaveTarget: target,
+        remixProvenance,
+        linkedPdfFilename,
+        linkedPdfPreviewUrl,
+        linkedPdfDownloadUrl,
+      }));
+      setIsRemixSaveModalOpen(false);
+      await performVerifiedDatabaseSave(target, {
+        overrideTitle: savedProjectFile.workspace_title,
+        overrideWorkspacePath: savedProjectFile.workspace_file_path,
+        overrideWorkspaceModule: savedProjectFile.workspace_module_name,
+      });
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        onLogout();
+        onOpenAuth();
+        publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
+      } else {
+        setRemixSaveDraft((current) => ({
+          ...current,
+          conflictMessage:
+            error?.response?.data?.detail ??
+            error?.message ??
+            'Failed to prepare a project target for this remix.',
+        }));
+      }
+    } finally {
+      setIsSubmittingRemixSave(false);
+    }
+  };
+
+  const handleUploadToVerifiedDatabase = async () => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+
+    if (remixProvenance && !remixSaveTarget) {
+      openRemixSaveModal();
+      return;
+    }
+
+    setIsUploadingToDatabase(true);
+    setWorkspaceNotice('');
+
+    try {
+      await performVerifiedDatabaseSave(remixSaveTarget);
     } catch (error: any) {
       console.error('Failed to upload the Lean playground code to the verified database:', error);
       if (error?.response?.status === 401) {
@@ -1779,6 +2299,10 @@ export function LeanPlayground({
     !pendingPdfFile && activeProofWorkspaceId && attachedPdfFilename
       ? getProofWorkspacePdfUrl(activeProofWorkspaceId, true)
       : null;
+  const sourceLinkedPdfVisible =
+    !pendingPdfFile &&
+    !savedPdfPreviewUrl &&
+    Boolean(linkedPdfFilename && linkedPdfPreviewUrl && linkedPdfDownloadUrl);
   const isWorkspaceBusy = isUploadingToDatabase || Boolean(activeBuildJobId);
   const canEditProject = Boolean(activeProjectSlug && activeProjectCanEdit);
   const saveActionLabel = 'Save to Verified DB';
@@ -1788,6 +2312,17 @@ export function LeanPlayground({
         ? 'Building...'
         : 'Queued...'
       : 'Saving...';
+  const remixBadgeText = remixProvenance
+    ? remixProvenance.kind === 'theorem'
+      ? `Remixed from ${remixProvenance.source_label} · ${remixProvenance.source_title}${remixProvenance.pdf_linked ? ' · PDF linked' : ''}`
+      : `Remixed from ${remixProvenance.source_label}${remixProvenance.source_project_file_path ? ` · ${remixProvenance.source_project_file_path}` : ''}${remixProvenance.source_project_module_name ? ` · ${remixProvenance.source_project_module_name}` : ''}`
+    : null;
+  const remixTargetLabel =
+    remixSaveTarget?.kind === 'scratch'
+      ? 'Target: Scratch verified entry'
+      : remixSaveTarget?.kind === 'project'
+        ? `Target: ${remixSaveTarget.target_project_title} · ${remixSaveTarget.target_project_file_path}`
+        : null;
 
   return (
     <section className="playground-screen">
@@ -1819,6 +2354,7 @@ export function LeanPlayground({
             error={previewModuleError}
             isLoading={Boolean(previewModulePath && openingProjectModulePath === previewModulePath)}
             modulePath={previewModulePath}
+            onRemix={handleRemixPreviewModule}
             onClose={() => {
               setPreviewModuleDetail(null);
               setPreviewModuleError('');
@@ -1834,6 +2370,8 @@ export function LeanPlayground({
                     ? canEditProject
                       ? 'Using your Lean project context'
                       : 'Using a public Lean project context'
+                    : documentSource === 'remix'
+                    ? 'Forked from a verified artifact'
                     : documentSource === 'workspace'
                     ? 'Loaded from your proof workspace'
                     : documentSource === 'shared'
@@ -1850,6 +2388,12 @@ export function LeanPlayground({
                 </span>
                 <span>{savedWorkspacePath}</span>
               </div>
+              {remixBadgeText && (
+                <div className="playground-remix-badge" title={remixBadgeText}>
+                  <Sparkles size={14} />
+                  <span className="playground-remix-badge-copy">{remixBadgeText}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1919,6 +2463,41 @@ export function LeanPlayground({
                     className="button-secondary"
                     href={savedPdfDownloadUrl}
                     download={attachedPdfFilename}
+                  >
+                    <Download size={16} />
+                    Download
+                  </a>
+              </div>
+            </div>
+          )}
+
+          {isAuxiliaryUiVisible &&
+            sourceLinkedPdfVisible &&
+            linkedPdfFilename &&
+            linkedPdfPreviewUrl &&
+            linkedPdfDownloadUrl && (
+              <div className="playground-pdf-banner is-linked">
+                <div className="playground-pdf-banner-info">
+                  <div className="playground-pdf-banner-label">
+                    <FileText size={16} />
+                    <span>{linkedPdfFilename}</span>
+                  </div>
+                  <span className="proof-badge">Linked from Source</span>
+                </div>
+                <div className="playground-pdf-banner-actions">
+                  <a
+                    className="button-secondary"
+                    href={linkedPdfPreviewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink size={16} />
+                    Open PDF
+                  </a>
+                  <a
+                    className="button-secondary"
+                    href={linkedPdfDownloadUrl}
+                    download={linkedPdfFilename}
                   >
                     <Download size={16} />
                     Download
@@ -2081,6 +2660,14 @@ export function LeanPlayground({
                         ? 'Projects group Lean files. Saving here publishes the current Lean code to the verified database under the active project.'
                         : 'Save the current Lean code to the verified database. If a PDF is attached, the verified detail view will show both side by side.'}
                     </div>
+                    {remixProvenance && !remixSaveTarget && (
+                      <div className="playground-remix-save-hint">
+                        First save will ask whether this remix should stay as a scratch verified entry or be stored inside one of your projects.
+                      </div>
+                    )}
+                    {remixTargetLabel && (
+                      <div className="playground-remix-save-target">{remixTargetLabel}</div>
+                    )}
                     <div className="playground-toolbar-actions" style={{ marginTop: '12px' }}>
                       <button
                         type="button"
@@ -2273,6 +2860,41 @@ export function LeanPlayground({
                         </div>
                       </div>
                     )}
+                  {sourceLinkedPdfVisible &&
+                    linkedPdfFilename &&
+                    linkedPdfPreviewUrl &&
+                    linkedPdfDownloadUrl && (
+                      <div className="proof-infoview-card playground-pdf-card">
+                        <div className="proof-infoview-label">Source PDF</div>
+                        <div className="playground-pdf-actions">
+                          <a
+                            className="button-secondary"
+                            href={linkedPdfPreviewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <ExternalLink size={16} />
+                            Open PDF
+                          </a>
+                          <a
+                            className="button-secondary"
+                            href={linkedPdfDownloadUrl}
+                            download={linkedPdfFilename}
+                          >
+                            <Download size={16} />
+                            Download PDF
+                          </a>
+                        </div>
+                        <iframe
+                          className="playground-pdf-frame"
+                          src={linkedPdfPreviewUrl}
+                          title={`${currentTitle} source PDF preview`}
+                        />
+                        <div className="proof-infoview-detail">
+                          This PDF is linked from the remixed source artifact and stays read-only until you save your own verified entry.
+                        </div>
+                      </div>
+                    )}
                   <div className="proof-infoview-card">
                     <div className="proof-infoview-label">Copilot Focus</div>
                     <div className="proof-infoview-detail">
@@ -2331,6 +2953,176 @@ export function LeanPlayground({
           )}
         </div>
       </div>
+
+      {isRemixSaveModalOpen && (
+        <div
+          className="playground-remix-save-backdrop"
+          onClick={() => setIsRemixSaveModalOpen(false)}
+        >
+          <div
+            className="glass-panel playground-remix-save-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="playground-remix-save-header">
+              <div>
+                <div className="proof-section-heading">
+                  <Sparkles size={16} color="var(--secondary-accent)" />
+                  <span>Save Remix</span>
+                </div>
+                <div className="proof-helper-text">
+                  Choose where the first saved version of this remix should live.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="playground-module-preview-close"
+                onClick={() => setIsRemixSaveModalOpen(false)}
+                aria-label="Close remix save dialog"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="playground-remix-save-options">
+              <button
+                type="button"
+                className={`playground-remix-save-option ${remixSaveDraft.mode === 'scratch' ? 'is-active' : ''}`}
+                onClick={() =>
+                  setRemixSaveDraft((current) => ({
+                    ...current,
+                    mode: 'scratch',
+                    overwriteConfirmed: false,
+                    conflictMessage: null,
+                  }))
+                }
+              >
+                <strong>Scratch verified entry</strong>
+                <span>Keep this as your own verified remix without attaching it to a target project.</span>
+              </button>
+              <button
+                type="button"
+                className={`playground-remix-save-option ${remixSaveDraft.mode === 'project' ? 'is-active' : ''}`}
+                onClick={() =>
+                  setRemixSaveDraft((current) => ({
+                    ...current,
+                    mode: 'project',
+                    projectKey: current.projectKey || resolveDefaultRemixProjectKey(),
+                    overwriteConfirmed: false,
+                    conflictMessage: null,
+                  }))
+                }
+              >
+                <strong>Save into my project</strong>
+                <span>Create or update a real project file first, then sync the remix to the verified database under that project.</span>
+              </button>
+            </div>
+
+            {remixSaveDraft.mode === 'project' && (
+              <div className="playground-remix-save-form">
+                <label className="playground-toolbar-group playground-title-field">
+                  <span>Project</span>
+                  <select
+                    className="input-field"
+                    value={remixSaveDraft.projectKey}
+                    onChange={(event) =>
+                      setRemixSaveDraft((current) => ({
+                        ...current,
+                        projectKey: event.target.value,
+                        overwriteConfirmed: false,
+                        conflictMessage: null,
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {ownedProjects.length > 0 ? 'Select a project' : 'Create a project first'}
+                    </option>
+                    {ownedProjects.map((project) => (
+                      <option
+                        key={`${project.owner_slug}:${project.slug}`}
+                        value={`${project.owner_slug}:${project.slug}`}
+                      >
+                        {project.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="playground-toolbar-group playground-title-field">
+                  <span>File name</span>
+                  <input
+                    className="input-field"
+                    value={remixSaveDraft.fileTitle}
+                    onChange={(event) =>
+                      setRemixSaveDraft((current) => ({
+                        ...current,
+                        fileTitle: event.target.value,
+                        overwriteConfirmed: false,
+                        conflictMessage: null,
+                      }))
+                    }
+                    placeholder="Lean file name"
+                  />
+                </label>
+                <div className="proof-infoview-detail">
+                  The file name will be normalized into a module-safe Lean filename before saving.
+                </div>
+                {remixSaveDraft.conflictMessage && (
+                  <div className="playground-remix-save-conflict">
+                    {remixSaveDraft.conflictMessage}
+                  </div>
+                )}
+                {remixSaveDraft.conflictMessage &&
+                  remixSaveDraft.conflictMessage.includes('already exists') && (
+                    <label className="playground-remix-overwrite-toggle">
+                      <input
+                        type="checkbox"
+                        checked={remixSaveDraft.overwriteConfirmed}
+                        onChange={(event) =>
+                          setRemixSaveDraft((current) => ({
+                            ...current,
+                            overwriteConfirmed: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span>Overwrite the existing project file.</span>
+                    </label>
+                  )}
+              </div>
+            )}
+
+            {remixSaveDraft.mode === 'scratch' && (
+              <div className="playground-remix-save-form">
+                <div className="proof-infoview-detail">
+                  This keeps the remix independent from the source theorem or project. If the source used a project import context, that same context is still reused for validation.
+                </div>
+              </div>
+            )}
+
+            <div className="playground-module-preview-footer">
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setIsRemixSaveModalOpen(false)}
+                disabled={isSubmittingRemixSave}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => void handleConfirmRemixSaveTarget()}
+                disabled={isSubmittingRemixSave}
+              >
+                {isSubmittingRemixSave ? (
+                  <LoaderCircle size={16} className="spin" />
+                ) : (
+                  <FileText size={16} />
+                )}
+                {isSubmittingRemixSave ? 'Preparing Save...' : 'Continue Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editorError && <div className="auth-error">{editorError}</div>}
     </section>
