@@ -20,7 +20,9 @@ from services.project_workspace import (
     module_name_from_project_path,
 )
 from services.rag_index import (
+    build_import_citation_counts,
     delete_indexed_document,
+    resolve_verified_document_identity,
     sync_playground_document_to_rag,
     sync_proof_workspace_to_rag,
 )
@@ -51,6 +53,7 @@ class TheoremSummaryResponse(BaseModel):
     project_owner_slug: str | None = None
     project_file_path: str | None = None
     project_module_name: str | None = None
+    cited_by_count: int = 0
 
 
 class TheoremDetailResponse(TheoremSummaryResponse):
@@ -108,6 +111,7 @@ def _build_summary(
     document: CodeDocument,
     workspace_lookup: dict[int, ProofWorkspace],
     current_user: User | None = None,
+    citation_count_lookup: dict[str, int] | None = None,
 ) -> TheoremSummaryResponse:
     metadata: dict[str, object] = {}
     try:
@@ -135,6 +139,7 @@ def _build_summary(
             or bool(current_user.is_admin)
         )
     )
+    effective_module_name, _, _ = resolve_verified_document_identity(document)
 
     return TheoremSummaryResponse(
         id=document.id,
@@ -158,6 +163,7 @@ def _build_summary(
         project_owner_slug=str(metadata.get("owner_slug")) if metadata.get("owner_slug") else None,
         project_file_path=str(metadata.get("project_file_path")) if metadata.get("project_file_path") else None,
         project_module_name=str(metadata.get("project_module_name")) if metadata.get("project_module_name") else None,
+        cited_by_count=(citation_count_lookup or {}).get(effective_module_name, 0),
     )
 
 
@@ -179,6 +185,33 @@ def _document_is_visible(
     if not isinstance(project_root, str) or not project_root.strip():
         return True
     return project_root in visible_project_roots
+
+
+def _build_citation_lookup(documents: list[CodeDocument]) -> dict[str, int]:
+    if not documents:
+        return {}
+    return build_import_citation_counts(documents)
+
+
+def _load_visible_verified_documents(
+    db: Session,
+    *,
+    visible_project_roots: set[str],
+) -> list[CodeDocument]:
+    documents = (
+        db.query(CodeDocument)
+        .filter(
+            CodeDocument.is_verified.is_(True),
+            CodeDocument.owner_id.isnot(None),
+            CodeDocument.source_kind.in_(("proof_workspace", "playground")),
+        )
+        .all()
+    )
+    return [
+        document
+        for document in documents
+        if _document_is_visible(document, visible_project_roots=visible_project_roots)
+    ]
 
 
 def _get_document_or_404(
@@ -270,7 +303,16 @@ async def get_theorems(
         if _document_is_visible(document, visible_project_roots=visible_project_roots)
     ]
     workspace_lookup = _build_workspace_lookup(db, documents)
-    return [_build_summary(document, workspace_lookup, current_user) for document in documents]
+    citation_lookup = _build_citation_lookup(documents)
+    return [
+        _build_summary(
+            document,
+            workspace_lookup,
+            current_user,
+            citation_count_lookup=citation_lookup,
+        )
+        for document in documents
+    ]
 
 
 @router.get("/lookup/project-module", response_model=TheoremSummaryResponse)
@@ -333,8 +375,17 @@ async def get_theorem_for_project_module(
         )
 
     document = best_match[1]
+    visible_documents = _load_visible_verified_documents(
+        db,
+        visible_project_roots=visible_project_roots,
+    )
     workspace_lookup = _build_workspace_lookup(db, [document])
-    return _build_summary(document, workspace_lookup, current_user)
+    return _build_summary(
+        document,
+        workspace_lookup,
+        current_user,
+        citation_count_lookup=_build_citation_lookup(visible_documents),
+    )
 
 
 @router.get("/{document_id}", response_model=TheoremDetailResponse)
@@ -362,8 +413,17 @@ async def get_theorem_detail(
     if not _document_is_visible(document, visible_project_roots=visible_project_roots):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Indexed proof not found.")
 
+    visible_documents = _load_visible_verified_documents(
+        db,
+        visible_project_roots=visible_project_roots,
+    )
     workspace_lookup = _build_workspace_lookup(db, [document])
-    summary = _build_summary(document, workspace_lookup, current_user)
+    summary = _build_summary(
+        document,
+        workspace_lookup,
+        current_user,
+        citation_count_lookup=_build_citation_lookup(visible_documents),
+    )
     return TheoremDetailResponse(**summary.model_dump(), content=document.content)
 
 
@@ -514,7 +574,20 @@ async def update_theorem_detail(
     db.commit()
     db.refresh(updated_document)
     workspace_lookup = _build_workspace_lookup(db, [updated_document])
-    summary = _build_summary(updated_document, workspace_lookup, current_user)
+    visible_project_roots = accessible_project_roots(
+        settings,
+        requester_user_id=current_user.id if current_user else None,
+    )
+    visible_documents = _load_visible_verified_documents(
+        db,
+        visible_project_roots=visible_project_roots,
+    )
+    summary = _build_summary(
+        updated_document,
+        workspace_lookup,
+        current_user,
+        citation_count_lookup=_build_citation_lookup(visible_documents),
+    )
     return TheoremDetailResponse(**summary.model_dump(), content=updated_document.content)
 
 

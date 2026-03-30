@@ -94,6 +94,7 @@ class LeanImportGraphNode(BaseModel):
     path: str | None
     title: str
     imports: int
+    cited_by_count: int = 0
     source_kind: str
     project_root: str | None = None
     project_slug: str | None = None

@@ -2,7 +2,7 @@
 
 - Owner: `user2`
 - Project slug: `test`
-- Visibility: `private`
+- Visibility: `public`
 - Package: `User2Test`
 - Entry module: `User2Test.Main`
 

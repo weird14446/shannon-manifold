@@ -16,6 +16,7 @@ interface GraphNode {
   path: string | null;
   title: string;
   imports: number;
+  cited_by_count: number;
   source_kind: string;
   project_root: string | null;
   project_slug: string | null;
@@ -229,7 +230,7 @@ export function AgentGraph({
           height={dimensions.height}
           graphData={filteredGraphData as { nodes: GraphNode[]; links: GraphLink[] }}
           nodeLabel={(node) =>
-            `${(node as GraphNode).module_name}\n${(node as GraphNode).path ?? ''}\nsource: ${(node as GraphNode).source_kind}${
+            `${(node as GraphNode).module_name}\n${(node as GraphNode).path ?? ''}\nimports: ${(node as GraphNode).imports}\ncited by: ${(node as GraphNode).cited_by_count}\nsource: ${(node as GraphNode).source_kind}${
               (node as GraphNode).project_title ? `\nproject: ${(node as GraphNode).project_title}` : ''
             }`
           }
@@ -254,7 +255,7 @@ export function AgentGraph({
             const typedNode = node as GraphNode & { x?: number; y?: number };
             const label = typedNode.label;
             const fontSize = 12 / globalScale;
-            const radius = Math.max(6, 5 + typedNode.imports);
+            const radius = Math.max(6, 5 + Math.max(typedNode.imports, typedNode.cited_by_count));
 
             ctx.beginPath();
             ctx.arc(typedNode.x ?? 0, typedNode.y ?? 0, radius, 0, 2 * Math.PI, false);

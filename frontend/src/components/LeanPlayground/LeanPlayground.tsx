@@ -18,7 +18,6 @@ import {
   getVerifiedBuildJob,
   getLeanWorkspaceInfo,
   getTheoremDetail,
-  getTheoremPdfUrl,
   listProjectModules,
   getProofWorkspacePdfUrl,
   listProjects,
@@ -33,7 +32,6 @@ import {
   type LeanWorkspaceInfo,
   type ProjectModule,
   type ProjectSummary,
-  type RemixProvenancePayload,
 } from '../../api';
 import { VerifiedModulePreviewCard } from './VerifiedModulePreviewCard';
 import 'lean4monaco/dist/css/custom.css';
@@ -71,8 +69,6 @@ export interface LeanPlaygroundSeed {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
-  remixProvenance?: RemixProvenancePayload | null;
-  remixSaveTarget?: RemixSaveTarget | null;
 }
 
 interface LeanPlaygroundProps {
@@ -105,8 +101,6 @@ interface PlaygroundDocument {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
-  remixProvenance?: RemixProvenancePayload | null;
-  remixSaveTarget?: RemixSaveTarget | null;
 }
 
 interface CursorSnapshot {
@@ -122,26 +116,6 @@ interface PendingVerifiedSaveSnapshot {
   projectFilePath: string | null;
   projectModuleName: string | null;
 }
-
-interface RemixSaveTargetProject {
-  kind: 'project';
-  target_project_slug: string;
-  target_project_owner_slug: string;
-  target_project_title: string;
-  target_project_root: string;
-  target_project_file_path: string;
-  target_project_module_name: string;
-  validation_project_root: string;
-  validation_project_file_path: string;
-}
-
-interface RemixSaveTargetScratch {
-  kind: 'scratch';
-  validation_project_root: string | null;
-  validation_project_file_path: string | null;
-}
-
-type RemixSaveTarget = RemixSaveTargetProject | RemixSaveTargetScratch;
 
 interface PlaygroundSessionMetadata {
   title: string;
@@ -162,16 +136,6 @@ interface PlaygroundSessionMetadata {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
-  remixProvenance?: RemixProvenancePayload | null;
-  remixSaveTarget?: RemixSaveTarget | null;
-}
-
-interface RemixSaveDraftState {
-  mode: 'scratch' | 'project';
-  projectKey: string;
-  fileTitle: string;
-  overwriteConfirmed: boolean;
-  conflictMessage: string | null;
 }
 
 const toEditorModelPath = (workspacePath: string) => `/${workspacePath.replace(/^\/+/, '')}`;
@@ -314,6 +278,41 @@ const resolveProjectWorkspaceTarget = (
   };
 };
 
+const resolveDisplayedWorkspaceTarget = ({
+  title,
+  projectSlug,
+  packageName,
+  entryFilePath,
+  fallbackPath,
+  fallbackModule,
+}: {
+  title: string;
+  projectSlug: string | null;
+  packageName: string | null;
+  entryFilePath?: string | null;
+  fallbackPath: string;
+  fallbackModule: string;
+}) => {
+  if (projectSlug && packageName) {
+    return resolveProjectWorkspaceTarget(packageName, title, entryFilePath);
+  }
+
+  if (projectSlug) {
+    return {
+      title,
+      path: fallbackPath,
+      module: fallbackModule,
+    };
+  }
+
+  const sharedTarget = resolveSharedWorkspaceTarget(title);
+  return {
+    title: title.trim() || sharedTarget.path.replace(/.*\//, '').replace(/\.lean$/i, ''),
+    path: sharedTarget.path,
+    module: sharedTarget.module,
+  };
+};
+
 const getLineText = (code: string, line: number) => {
   const lines = code.split('\n');
   return lines[line - 1]?.trim() ?? '';
@@ -378,8 +377,6 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       projectModuleName: seed.projectModuleName ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
       projectEntryModuleName: seed.projectEntryModuleName ?? null,
-      remixProvenance: seed.remixProvenance ?? null,
-      remixSaveTarget: seed.remixSaveTarget ?? null,
     };
   }
 
@@ -392,8 +389,6 @@ const resolveInitialDocument = (seed: LeanPlaygroundSeed | null): PlaygroundDocu
       linkedPdfFilename: seed.linkedPdfFilename ?? null,
       linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
       linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
-      remixProvenance: seed.remixProvenance ?? null,
-      remixSaveTarget: seed.remixSaveTarget ?? null,
     };
   }
 
@@ -527,7 +522,7 @@ export function LeanPlayground({
   const [currentCode, setCurrentCode] = useState(initialDocument.code);
   const [currentTitle, setCurrentTitle] = useState(initialDocument.title);
   const [documentSource, setDocumentSource] = useState<string>(
-    initialDocument.remixProvenance ? 'remix' : seed?.code ? 'workspace' : sharedDocument ? 'shared' : 'local',
+    seed?.code ? 'workspace' : sharedDocument ? 'shared' : 'local',
   );
   const [editorStatus, setEditorStatus] = useState<'booting' | 'ready' | 'error'>('booting');
   const [editorError, setEditorError] = useState('');
@@ -608,21 +603,6 @@ export function LeanPlayground({
   const [activeBuildJobId, setActiveBuildJobId] = useState<string | null>(null);
   const [activeBuildJobStatus, setActiveBuildJobStatus] = useState<string | null>(null);
   const [pendingVerifiedSave, setPendingVerifiedSave] = useState<PendingVerifiedSaveSnapshot | null>(null);
-  const [remixProvenance, setRemixProvenance] = useState<RemixProvenancePayload | null>(
-    initialDocument.remixProvenance ?? null,
-  );
-  const [remixSaveTarget, setRemixSaveTarget] = useState<RemixSaveTarget | null>(
-    initialDocument.remixSaveTarget ?? null,
-  );
-  const [isRemixSaveModalOpen, setIsRemixSaveModalOpen] = useState(false);
-  const [isSubmittingRemixSave, setIsSubmittingRemixSave] = useState(false);
-  const [remixSaveDraft, setRemixSaveDraft] = useState<RemixSaveDraftState>({
-    mode: 'scratch',
-    projectKey: '',
-    fileTitle: initialDocument.title,
-    overwriteConfirmed: false,
-    conflictMessage: null,
-  });
   const editorModelPath = toEditorModelPath(savedWorkspacePath);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -649,9 +629,24 @@ export function LeanPlayground({
   const projectSelectionValue = activeProjectSlug
     ? `${activeProjectOwnerSlug ?? ''}:${activeProjectSlug}`
     : '';
-  const ownedProjects = useMemo(
-    () => availableProjects.filter((project) => project.can_edit),
-    [availableProjects],
+  const displayedWorkspaceTarget = useMemo(
+    () =>
+      resolveDisplayedWorkspaceTarget({
+        title: currentTitle,
+        projectSlug: activeProjectSlug,
+        packageName: activeProjectPackageName,
+        entryFilePath: activeProjectEntryFilePath,
+        fallbackPath: savedWorkspacePath,
+        fallbackModule: savedWorkspaceModule,
+      }),
+    [
+      activeProjectEntryFilePath,
+      activeProjectPackageName,
+      activeProjectSlug,
+      currentTitle,
+      savedWorkspaceModule,
+      savedWorkspacePath,
+    ],
   );
   const selectableProjects = useMemo(() => {
     const ownedProjects = availableProjects.filter((project) => project.can_edit);
@@ -812,8 +807,6 @@ export function LeanPlayground({
           projectModuleName: savedWorkspaceModule,
           projectEntryFilePath: activeProjectEntryFilePath,
           projectEntryModuleName: activeProjectEntryModuleName,
-          remixProvenance,
-          remixSaveTarget,
         }),
       );
     }, 250);
@@ -837,8 +830,6 @@ export function LeanPlayground({
     linkedPdfDownloadUrl,
     linkedPdfFilename,
     linkedPdfPreviewUrl,
-    remixProvenance,
-    remixSaveTarget,
     savedWorkspaceModule,
     savedWorkspacePath,
   ]);
@@ -863,8 +854,6 @@ export function LeanPlayground({
       projectModuleName: savedWorkspaceModule,
       projectEntryFilePath: activeProjectEntryFilePath,
       projectEntryModuleName: activeProjectEntryModuleName,
-      remixProvenance,
-      remixSaveTarget,
     });
   }, [
     activeProofWorkspaceId,
@@ -884,8 +873,6 @@ export function LeanPlayground({
     linkedPdfFilename,
     linkedPdfPreviewUrl,
     onSessionMetadataChange,
-    remixProvenance,
-    remixSaveTarget,
     savedWorkspaceModule,
     savedWorkspacePath,
   ]);
@@ -1335,7 +1322,7 @@ export function LeanPlayground({
     applyDocument({
       code: seed.code,
       title: seed.title,
-      source: seed.remixProvenance ? 'remix' : seed.projectSlug ? 'project' : 'workspace',
+      source: seed.projectSlug ? 'project' : 'workspace',
       proofWorkspaceId: seed.proofWorkspaceId ?? null,
       pdfFilename: seed.pdfFilename ?? null,
       linkedPdfFilename: seed.linkedPdfFilename ?? null,
@@ -1353,8 +1340,6 @@ export function LeanPlayground({
       projectCanEdit: seed.projectCanEdit ?? null,
       projectEntryFilePath: seed.projectEntryFilePath ?? null,
       projectEntryModuleName: seed.projectEntryModuleName ?? null,
-      remixProvenance: seed.remixProvenance ?? null,
-      remixSaveTarget: seed.remixSaveTarget ?? null,
     });
   }, [
     savedWorkspaceModule,
@@ -1377,8 +1362,6 @@ export function LeanPlayground({
     seed?.projectTitle,
     seed?.projectVisibility,
     seed?.proofWorkspaceId,
-    seed?.remixProvenance,
-    seed?.remixSaveTarget,
     seed?.revision,
     seed?.title,
   ]);
@@ -1408,7 +1391,7 @@ export function LeanPlayground({
         applyDocument({
           code: project.content,
           title: project.workspace_title,
-          source: seed.remixProvenance ? 'remix' : 'project',
+          source: 'project',
           workspacePath: project.workspace_file_path,
           workspaceModule: project.workspace_module_name,
           projectSlug: project.slug,
@@ -1424,8 +1407,6 @@ export function LeanPlayground({
           linkedPdfFilename: seed.linkedPdfFilename ?? null,
           linkedPdfPreviewUrl: seed.linkedPdfPreviewUrl ?? null,
           linkedPdfDownloadUrl: seed.linkedPdfDownloadUrl ?? null,
-          remixProvenance: seed.remixProvenance ?? null,
-          remixSaveTarget: seed.remixSaveTarget ?? null,
         });
       } catch (error: any) {
         if (!isMounted) {
@@ -1459,8 +1440,6 @@ export function LeanPlayground({
     seed?.projectFilePath,
     seed?.projectOwnerSlug,
     seed?.projectSlug,
-    seed?.remixProvenance,
-    seed?.remixSaveTarget,
     seed?.revision,
   ]);
 
@@ -1485,8 +1464,6 @@ export function LeanPlayground({
     projectCanEdit = null,
     projectEntryFilePath = null,
     projectEntryModuleName = null,
-    remixProvenance: nextRemixProvenance = null,
-    remixSaveTarget: nextRemixSaveTarget = null,
   }: {
     code: string;
     title: string;
@@ -1508,8 +1485,6 @@ export function LeanPlayground({
     projectCanEdit?: boolean | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
-    remixProvenance?: RemixProvenancePayload | null;
-    remixSaveTarget?: RemixSaveTarget | null;
   }) => {
     setPreviewModuleDetail(null);
     setPreviewModuleError('');
@@ -1536,8 +1511,6 @@ export function LeanPlayground({
     setLinkedPdfFilename(nextLinkedPdfFilename);
     setLinkedPdfPreviewUrl(nextLinkedPdfPreviewUrl);
     setLinkedPdfDownloadUrl(nextLinkedPdfDownloadUrl);
-    setRemixProvenance(nextRemixProvenance);
-    setRemixSaveTarget(nextRemixSaveTarget);
     setBaselineDocument({
       code,
       title,
@@ -1558,8 +1531,6 @@ export function LeanPlayground({
       projectModuleName: workspaceModule,
       projectEntryFilePath,
       projectEntryModuleName,
-      remixProvenance: nextRemixProvenance,
-      remixSaveTarget: nextRemixSaveTarget,
     });
     setShareState('idle');
 
@@ -1582,11 +1553,7 @@ export function LeanPlayground({
     applyDocument({
       code: baselineDocument.code,
       title: baselineDocument.title,
-      source: baselineDocument.remixProvenance
-        ? 'remix'
-        : baselineDocument.projectSlug
-          ? 'project'
-          : documentSource,
+      source: baselineDocument.projectSlug ? 'project' : documentSource,
       proofWorkspaceId: baselineDocument.proofWorkspaceId ?? null,
       pdfFilename: baselineDocument.pdfFilename ?? null,
       linkedPdfFilename: baselineDocument.linkedPdfFilename ?? null,
@@ -1604,8 +1571,6 @@ export function LeanPlayground({
       projectCanEdit: baselineDocument.projectCanEdit ?? null,
       projectEntryFilePath: baselineDocument.projectEntryFilePath ?? null,
       projectEntryModuleName: baselineDocument.projectEntryModuleName ?? null,
-      remixProvenance: baselineDocument.remixProvenance ?? null,
-      remixSaveTarget: baselineDocument.remixSaveTarget ?? null,
     });
   };
 
@@ -1667,6 +1632,14 @@ export function LeanPlayground({
     try {
       const code = await file.text();
       const title = file.name.replace(/\.[^/.]+$/, '') || 'Uploaded Lean File';
+      const nextTarget = resolveDisplayedWorkspaceTarget({
+        title,
+        projectSlug: activeProjectSlug,
+        packageName: activeProjectPackageName,
+        entryFilePath: activeProjectEntryFilePath,
+        fallbackPath: savedWorkspacePath,
+        fallbackModule: savedWorkspaceModule,
+      });
       setEditorError('');
       applyDocument({
         code,
@@ -1674,8 +1647,8 @@ export function LeanPlayground({
         source: activeProjectSlug ? 'project' : 'uploaded',
         proofWorkspaceId: activeProjectSlug ? activeProofWorkspaceId : null,
         pdfFilename: null,
-        workspacePath: savedWorkspacePath,
-        workspaceModule: savedWorkspaceModule,
+        workspacePath: nextTarget.path,
+        workspaceModule: nextTarget.module,
         projectSlug: activeProjectSlug,
         projectOwnerSlug: activeProjectOwnerSlug,
         projectTitle: activeProjectTitle,
@@ -1763,173 +1736,97 @@ export function LeanPlayground({
     if (!previewModuleDetail) {
       return;
     }
-
-    const packageNameFromModule =
-      previewModuleDetail.project_module_name?.split('.').at(0) ?? null;
-    const sourceProjectLabel =
-      previewModuleDetail.project_owner_slug && previewModuleDetail.project_slug
-        ? `${previewModuleDetail.project_owner_slug}/${previewModuleDetail.project_slug}`
-        : `module #${previewModuleDetail.id}`;
-    const nextRemixProvenance: RemixProvenancePayload = {
-      kind: 'project_module',
-      source_document_id: previewModuleDetail.id,
-      source_title: previewModuleDetail.title,
-      source_label: sourceProjectLabel,
-      source_project_root: previewModuleDetail.project_root,
-      source_project_slug: previewModuleDetail.project_slug,
-      source_owner_slug: previewModuleDetail.project_owner_slug,
-      source_project_file_path: previewModuleDetail.project_file_path,
-      source_project_module_name: previewModuleDetail.project_module_name,
-      pdf_linked: previewModuleDetail.has_pdf,
-    };
+    const remixTarget = resolveSharedWorkspaceTarget(previewModuleDetail.title);
 
     replacePendingPdf(null);
     applyDocument({
       code: previewModuleDetail.content,
       title: previewModuleDetail.title,
-      source: 'remix',
+      source: 'local',
       proofWorkspaceId: null,
       pdfFilename: null,
-      linkedPdfFilename: previewModuleDetail.pdf_filename,
-      linkedPdfPreviewUrl: previewModuleDetail.has_pdf
-        ? getTheoremPdfUrl(previewModuleDetail.id)
-        : null,
-      linkedPdfDownloadUrl: previewModuleDetail.has_pdf
-        ? getTheoremPdfUrl(previewModuleDetail.id, true)
-        : null,
-      workspacePath: previewModuleDetail.project_file_path ?? savedWorkspacePath,
-      workspaceModule: previewModuleDetail.project_module_name ?? savedWorkspaceModule,
-      projectSlug: previewModuleDetail.project_slug,
-      projectOwnerSlug: previewModuleDetail.project_owner_slug,
-      projectTitle: previewModuleDetail.project_title,
-      projectRoot: previewModuleDetail.project_root,
-      packageName: packageNameFromModule,
-      remixProvenance: nextRemixProvenance,
-      remixSaveTarget: null,
+      linkedPdfFilename: null,
+      linkedPdfPreviewUrl: null,
+      linkedPdfDownloadUrl: null,
+      workspacePath: remixTarget.path,
+      workspaceModule: remixTarget.module,
+      projectSlug: null,
+      projectOwnerSlug: null,
+      projectTitle: null,
+      projectRoot: null,
+      packageName: null,
+      projectGithubUrl: null,
+      projectVisibility: null,
+      projectCanEdit: null,
+      projectEntryFilePath: null,
+      projectEntryModuleName: null,
     });
     setPreviewModuleDetail(null);
     setPreviewModuleError('');
     setPreviewModulePath(null);
   };
 
-  const resolveDefaultRemixProjectKey = () => {
-    const activeOwnedProject = ownedProjects.find(
-      (project) =>
-        project.slug === activeProjectSlug && project.owner_slug === activeProjectOwnerSlug,
-    );
-    const fallbackProject = activeOwnedProject ?? ownedProjects[0];
-    return fallbackProject ? `${fallbackProject.owner_slug}:${fallbackProject.slug}` : '';
-  };
+  const performVerifiedDatabaseSave = async () => {
+    const effectiveTitleInput = currentTitle;
+    const preparedProjectTarget = activeProjectSlug
+      ? commitProjectFileName(effectiveTitleInput)
+      : null;
+    let effectiveTitle =
+      activeProjectSlug && preparedProjectTarget
+        ? preparedProjectTarget.title
+        : currentTitle.trim() || DEFAULT_DOCUMENT.title;
+    let targetProjectRoot = activeProjectRoot;
+    let targetProjectFilePath = activeProjectSlug
+      ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+      : null;
+    let targetProjectModuleName = activeProjectSlug
+      ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
+      : null;
+    let validationProjectRoot = activeProjectRoot;
+    let validationProjectFilePath = activeProjectSlug
+      ? (preparedProjectTarget?.path ?? savedWorkspacePath)
+      : null;
 
-  const openRemixSaveModal = () => {
-    setRemixSaveDraft({
-      mode: 'scratch',
-      projectKey: resolveDefaultRemixProjectKey(),
-      fileTitle: currentTitle,
-      overwriteConfirmed: false,
-      conflictMessage: null,
-    });
-    setIsRemixSaveModalOpen(true);
-  };
+    if (activeProjectSlug) {
+      if (!canEditProject) {
+        throw new Error(
+          'The selected project is read-only. Choose one of your editable projects or clear the project selection.',
+        );
+      }
 
-  useEffect(() => {
-    if (!isRemixSaveModalOpen || remixSaveDraft.projectKey || ownedProjects.length === 0) {
-      return;
+      const savedProjectFile = await saveProjectFile(activeProjectSlug, {
+        path: targetProjectFilePath ?? savedWorkspacePath,
+        content: currentCode,
+      });
+
+      effectiveTitle = savedProjectFile.workspace_title;
+      targetProjectRoot = savedProjectFile.project_root;
+      targetProjectFilePath = savedProjectFile.workspace_file_path;
+      targetProjectModuleName = savedProjectFile.workspace_module_name;
+      validationProjectRoot = savedProjectFile.project_root;
+      validationProjectFilePath = savedProjectFile.workspace_file_path;
+
+      setCurrentTitle(savedProjectFile.workspace_title);
+      setSavedWorkspacePath(savedProjectFile.workspace_file_path);
+      setSavedWorkspaceModule(savedProjectFile.workspace_module_name);
+      setDocumentSource('project');
+      setBaselineDocument((current) => ({
+        ...current,
+        title: savedProjectFile.workspace_title,
+        projectSlug: savedProjectFile.slug,
+        projectOwnerSlug: savedProjectFile.owner_slug,
+        projectTitle: savedProjectFile.title,
+        projectRoot: savedProjectFile.project_root,
+        packageName: savedProjectFile.package_name,
+        projectGithubUrl: savedProjectFile.github_url,
+        projectVisibility: savedProjectFile.visibility,
+        projectCanEdit: savedProjectFile.can_edit,
+        projectFilePath: savedProjectFile.workspace_file_path,
+        projectModuleName: savedProjectFile.workspace_module_name,
+        projectEntryFilePath: savedProjectFile.entry_file_path,
+        projectEntryModuleName: savedProjectFile.entry_module_name,
+      }));
     }
-
-    setRemixSaveDraft((current) => ({
-      ...current,
-      projectKey: resolveDefaultRemixProjectKey(),
-    }));
-  }, [isRemixSaveModalOpen, ownedProjects, remixSaveDraft.projectKey]);
-
-  const resolveRemixValidationContext = (target: RemixSaveTarget | null) => {
-    if (target?.kind === 'project') {
-      return {
-        validationProjectRoot: target.validation_project_root,
-        validationProjectFilePath: target.validation_project_file_path,
-      };
-    }
-    if (target?.kind === 'scratch') {
-      return {
-        validationProjectRoot: target.validation_project_root,
-        validationProjectFilePath: target.validation_project_file_path,
-      };
-    }
-
-    return {
-      validationProjectRoot: activeProjectRoot,
-      validationProjectFilePath: activeProjectRoot ? savedWorkspacePath : null,
-    };
-  };
-
-  const applyProjectContextFromOpenResponse = (project: {
-    slug: string;
-    owner_slug: string;
-    title: string;
-    project_root: string;
-    package_name: string;
-    github_url: string | null;
-    visibility: 'public' | 'private';
-    can_edit: boolean;
-    entry_file_path: string;
-    entry_module_name: string;
-  }) => {
-    setActiveProjectSlug(project.slug);
-    setActiveProjectOwnerSlug(project.owner_slug);
-    setActiveProjectTitle(project.title);
-    setActiveProjectRoot(project.project_root);
-    setActiveProjectPackageName(project.package_name);
-    setActiveProjectGithubUrl(project.github_url);
-    setActiveProjectVisibility(project.visibility);
-    setActiveProjectCanEdit(project.can_edit);
-    setProjectGithubUrlDraft(project.github_url ?? '');
-    setActiveProjectEntryFilePath(project.entry_file_path);
-    setActiveProjectEntryModuleName(project.entry_module_name);
-  };
-
-  const performVerifiedDatabaseSave = async (
-    resolvedRemixSaveTarget: RemixSaveTarget | null,
-    options?: {
-      overrideTitle?: string;
-      overrideWorkspacePath?: string | null;
-      overrideWorkspaceModule?: string | null;
-    },
-  ) => {
-    const effectiveTitleInput = options?.overrideTitle ?? currentTitle;
-    const preparedProjectTarget =
-      !resolvedRemixSaveTarget && activeProjectSlug ? commitProjectFileName(effectiveTitleInput) : null;
-    const effectiveTitle =
-      resolvedRemixSaveTarget?.kind === 'project'
-        ? ((options?.overrideTitle ?? currentTitle.trim()) || DEFAULT_DOCUMENT.title)
-        : activeProjectSlug && preparedProjectTarget
-          ? preparedProjectTarget.title
-          : currentTitle.trim() || DEFAULT_DOCUMENT.title;
-
-    const targetProjectRoot =
-      resolvedRemixSaveTarget?.kind === 'project'
-        ? resolvedRemixSaveTarget.target_project_root
-        : remixProvenance
-          ? null
-          : activeProjectRoot;
-    const targetProjectFilePath =
-      resolvedRemixSaveTarget?.kind === 'project'
-        ? resolvedRemixSaveTarget.target_project_file_path
-        : remixProvenance
-          ? null
-          : activeProjectSlug
-            ? (preparedProjectTarget?.path ?? savedWorkspacePath)
-            : null;
-    const targetProjectModuleName =
-      resolvedRemixSaveTarget?.kind === 'project'
-        ? resolvedRemixSaveTarget.target_project_module_name
-        : remixProvenance
-          ? null
-          : activeProjectSlug
-            ? (preparedProjectTarget?.module ?? savedWorkspaceModule)
-            : null;
-    const { validationProjectRoot, validationProjectFilePath } =
-      resolveRemixValidationContext(resolvedRemixSaveTarget);
 
     if (pendingPdfFile) {
       const fallbackTitle = pendingPdfFile.name.replace(/\.pdf$/i, '') || 'Uploaded proof';
@@ -1944,23 +1841,17 @@ export function LeanPlayground({
         project_file_path: targetProjectFilePath,
         validation_project_root: validationProjectRoot,
         validation_project_file_path: validationProjectFilePath,
-        remix_provenance: remixProvenance,
       });
-      const nextTitle =
-        activeProjectSlug || resolvedRemixSaveTarget?.kind === 'project'
-          ? effectiveTitle
-          : workspace.title;
+      const nextTitle = activeProjectSlug ? effectiveTitle : workspace.title;
       const nextCode =
-        activeProjectSlug || resolvedRemixSaveTarget?.kind === 'project' || hasMeaningfulLeanCode(currentCode)
-          ? currentCode
-          : workspace.lean4_code;
+        activeProjectSlug || hasMeaningfulLeanCode(currentCode) ? currentCode : workspace.lean4_code;
       const nextPdfFilename =
         workspace.pdf_filename ?? workspace.source_filename ?? pendingPdfFile.name;
 
       replacePendingPdf(null);
       setAttachedPdfFilename(nextPdfFilename);
       setActiveProofWorkspaceId(workspace.id);
-      if (!activeProjectSlug && resolvedRemixSaveTarget?.kind !== 'project') {
+      if (!activeProjectSlug) {
         setCurrentTitle(nextTitle);
         setCurrentCode(nextCode);
         latestCodeRef.current = nextCode;
@@ -2011,16 +1902,12 @@ export function LeanPlayground({
       project_file_path: targetProjectFilePath,
       validation_project_root: validationProjectRoot,
       validation_project_file_path: validationProjectFilePath,
-      remix_provenance: remixProvenance,
     });
 
     setWorkspaceInfo(response);
-    if (!activeProjectSlug && resolvedRemixSaveTarget?.kind !== 'project') {
+    if (!activeProjectSlug) {
       setSavedWorkspacePath(response.saved_path);
       setSavedWorkspaceModule(response.saved_module);
-    } else if (options?.overrideWorkspacePath && options?.overrideWorkspaceModule) {
-      setSavedWorkspacePath(options.overrideWorkspacePath);
-      setSavedWorkspaceModule(options.overrideWorkspaceModule);
     }
     setActiveProofWorkspaceId(response.proof_workspace_id ?? activeProofWorkspaceId);
     setAttachedPdfFilename(response.pdf_filename ?? attachedPdfFilename ?? null);
@@ -2055,145 +1942,9 @@ export function LeanPlayground({
     }
   };
 
-  const handleConfirmRemixSaveTarget = async () => {
-    if (!currentUser) {
-      onOpenAuth();
-      return;
-    }
-
-    setIsSubmittingRemixSave(true);
-    setWorkspaceNotice('');
-
-    try {
-      if (remixSaveDraft.mode === 'scratch') {
-        const target: RemixSaveTargetScratch = {
-          kind: 'scratch',
-          validation_project_root: remixProvenance?.source_project_root ?? null,
-          validation_project_file_path: remixProvenance?.source_project_file_path ?? null,
-        };
-        setRemixSaveTarget(target);
-        setBaselineDocument((current) => ({
-          ...current,
-          remixSaveTarget: target,
-          remixProvenance,
-          linkedPdfFilename,
-          linkedPdfPreviewUrl,
-          linkedPdfDownloadUrl,
-        }));
-        setIsRemixSaveModalOpen(false);
-        await performVerifiedDatabaseSave(target);
-        return;
-      }
-
-      const selectedProject = ownedProjects.find(
-        (project) => `${project.owner_slug}:${project.slug}` === remixSaveDraft.projectKey,
-      );
-      if (!selectedProject) {
-        setRemixSaveDraft((current) => ({
-          ...current,
-          conflictMessage: 'Pick one of your projects before saving this remix.',
-        }));
-        return;
-      }
-
-      const nextTarget = resolveProjectWorkspaceTarget(
-        selectedProject.package_name,
-        remixSaveDraft.fileTitle,
-        selectedProject.entry_file_path,
-      );
-
-      try {
-        await openProject(selectedProject.slug, nextTarget.path, selectedProject.owner_slug);
-        if (!remixSaveDraft.overwriteConfirmed) {
-          setRemixSaveDraft((current) => ({
-            ...current,
-            fileTitle: nextTarget.title,
-            conflictMessage: `\`${nextTarget.path}\` already exists in ${selectedProject.title}. Confirm overwrite to continue.`,
-          }));
-          return;
-        }
-      } catch (probeError: any) {
-        if (probeError?.response?.status !== 404) {
-          throw probeError;
-        }
-      }
-
-      const savedProjectFile = await saveProjectFile(selectedProject.slug, {
-        path: nextTarget.path,
-        content: currentCode,
-      });
-      const target: RemixSaveTargetProject = {
-        kind: 'project',
-        target_project_slug: savedProjectFile.slug,
-        target_project_owner_slug: savedProjectFile.owner_slug,
-        target_project_title: savedProjectFile.title,
-        target_project_root: savedProjectFile.project_root,
-        target_project_file_path: savedProjectFile.workspace_file_path,
-        target_project_module_name: savedProjectFile.workspace_module_name,
-        validation_project_root: savedProjectFile.project_root,
-        validation_project_file_path: savedProjectFile.workspace_file_path,
-      };
-
-      setCurrentTitle(savedProjectFile.workspace_title);
-      applyProjectContextFromOpenResponse(savedProjectFile);
-      setSavedWorkspacePath(savedProjectFile.workspace_file_path);
-      setSavedWorkspaceModule(savedProjectFile.workspace_module_name);
-      setDocumentSource('remix');
-      setRemixSaveTarget(target);
-      setBaselineDocument((current) => ({
-        ...current,
-        title: savedProjectFile.workspace_title,
-        projectSlug: savedProjectFile.slug,
-        projectOwnerSlug: savedProjectFile.owner_slug,
-        projectTitle: savedProjectFile.title,
-        projectRoot: savedProjectFile.project_root,
-        packageName: savedProjectFile.package_name,
-        projectGithubUrl: savedProjectFile.github_url,
-        projectVisibility: savedProjectFile.visibility,
-        projectCanEdit: savedProjectFile.can_edit,
-        projectFilePath: savedProjectFile.workspace_file_path,
-        projectModuleName: savedProjectFile.workspace_module_name,
-        projectEntryFilePath: savedProjectFile.entry_file_path,
-        projectEntryModuleName: savedProjectFile.entry_module_name,
-        remixSaveTarget: target,
-        remixProvenance,
-        linkedPdfFilename,
-        linkedPdfPreviewUrl,
-        linkedPdfDownloadUrl,
-      }));
-      setIsRemixSaveModalOpen(false);
-      await performVerifiedDatabaseSave(target, {
-        overrideTitle: savedProjectFile.workspace_title,
-        overrideWorkspacePath: savedProjectFile.workspace_file_path,
-        overrideWorkspaceModule: savedProjectFile.workspace_module_name,
-      });
-    } catch (error: any) {
-      if (error?.response?.status === 401) {
-        onLogout();
-        onOpenAuth();
-        publishWorkspaceNotice('Your session expired. Please sign in again.', 'error');
-      } else {
-        setRemixSaveDraft((current) => ({
-          ...current,
-          conflictMessage:
-            error?.response?.data?.detail ??
-            error?.message ??
-            'Failed to prepare a project target for this remix.',
-        }));
-      }
-    } finally {
-      setIsSubmittingRemixSave(false);
-    }
-  };
-
   const handleUploadToVerifiedDatabase = async () => {
     if (!currentUser) {
       onOpenAuth();
-      return;
-    }
-
-    if (remixProvenance && !remixSaveTarget) {
-      openRemixSaveModal();
       return;
     }
 
@@ -2201,7 +1952,7 @@ export function LeanPlayground({
     setWorkspaceNotice('');
 
     try {
-      await performVerifiedDatabaseSave(remixSaveTarget);
+      await performVerifiedDatabaseSave();
     } catch (error: any) {
       console.error('Failed to upload the Lean playground code to the verified database:', error);
       if (error?.response?.status === 401) {
@@ -2312,17 +2063,6 @@ export function LeanPlayground({
         ? 'Building...'
         : 'Queued...'
       : 'Saving...';
-  const remixBadgeText = remixProvenance
-    ? remixProvenance.kind === 'theorem'
-      ? `Remixed from ${remixProvenance.source_label} · ${remixProvenance.source_title}${remixProvenance.pdf_linked ? ' · PDF linked' : ''}`
-      : `Remixed from ${remixProvenance.source_label}${remixProvenance.source_project_file_path ? ` · ${remixProvenance.source_project_file_path}` : ''}${remixProvenance.source_project_module_name ? ` · ${remixProvenance.source_project_module_name}` : ''}`
-    : null;
-  const remixTargetLabel =
-    remixSaveTarget?.kind === 'scratch'
-      ? 'Target: Scratch verified entry'
-      : remixSaveTarget?.kind === 'project'
-        ? `Target: ${remixSaveTarget.target_project_title} · ${remixSaveTarget.target_project_file_path}`
-        : null;
 
   return (
     <section className="playground-screen">
@@ -2370,8 +2110,6 @@ export function LeanPlayground({
                     ? canEditProject
                       ? 'Using your Lean project context'
                       : 'Using a public Lean project context'
-                    : documentSource === 'remix'
-                    ? 'Forked from a verified artifact'
                     : documentSource === 'workspace'
                     ? 'Loaded from your proof workspace'
                     : documentSource === 'shared'
@@ -2386,14 +2124,8 @@ export function LeanPlayground({
                   {editorStatus === 'booting' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}
                   {editorStatus === 'booting' ? 'Booting Lean' : 'Lean4'}
                 </span>
-                <span>{savedWorkspacePath}</span>
+                <span>{displayedWorkspaceTarget.path}</span>
               </div>
-              {remixBadgeText && (
-                <div className="playground-remix-badge" title={remixBadgeText}>
-                  <Sparkles size={14} />
-                  <span className="playground-remix-badge-copy">{remixBadgeText}</span>
-                </div>
-              )}
             </div>
           )}
 
@@ -2642,12 +2374,12 @@ export function LeanPlayground({
                       </div>
                     )}
                     <div className="proof-infoview-detail">Resolved workspace file</div>
-                    <div className="playground-inline-scroll-code" title={savedWorkspacePath}>
-                      {savedWorkspacePath}
+                    <div className="playground-inline-scroll-code" title={displayedWorkspaceTarget.path}>
+                      {displayedWorkspaceTarget.path}
                     </div>
                     <div className="proof-infoview-detail">Resolved module name</div>
-                    <div className="playground-inline-scroll-code" title={savedWorkspaceModule}>
-                      {savedWorkspaceModule}
+                    <div className="playground-inline-scroll-code" title={displayedWorkspaceTarget.module}>
+                      {displayedWorkspaceTarget.module}
                     </div>
                   </div>
                 </div>
@@ -2660,14 +2392,6 @@ export function LeanPlayground({
                         ? 'Projects group Lean files. Saving here publishes the current Lean code to the verified database under the active project.'
                         : 'Save the current Lean code to the verified database. If a PDF is attached, the verified detail view will show both side by side.'}
                     </div>
-                    {remixProvenance && !remixSaveTarget && (
-                      <div className="playground-remix-save-hint">
-                        First save will ask whether this remix should stay as a scratch verified entry or be stored inside one of your projects.
-                      </div>
-                    )}
-                    {remixTargetLabel && (
-                      <div className="playground-remix-save-target">{remixTargetLabel}</div>
-                    )}
                     <div className="playground-toolbar-actions" style={{ marginTop: '12px' }}>
                       <button
                         type="button"
@@ -2726,13 +2450,13 @@ export function LeanPlayground({
                     <span className="proof-badge">{editorStatus}</span>
                     <span className="proof-badge">{lineCount} lines</span>
                     <span className="proof-badge">{`L${cursorSnapshot.line}:C${cursorSnapshot.column}`}</span>
-                    <span className="proof-badge">{savedWorkspaceModule}</span>
+                    <span className="proof-badge">{displayedWorkspaceTarget.module}</span>
                     <span className="proof-badge">{webSocketUrl}</span>
                   </div>
                   <div className="proof-infoview-card">
                     <div className="proof-infoview-label">Workspace File</div>
                     <div className="proof-infoview-detail">
-                      {savedWorkspacePath}
+                      {displayedWorkspaceTarget.path}
                     </div>
                   </div>
                   {isProjectMode && (
@@ -2891,7 +2615,7 @@ export function LeanPlayground({
                           title={`${currentTitle} source PDF preview`}
                         />
                         <div className="proof-infoview-detail">
-                          This PDF is linked from the remixed source artifact and stays read-only until you save your own verified entry.
+                          This PDF is linked from the current source artifact and stays read-only in the playground.
                         </div>
                       </div>
                     )}
@@ -2953,176 +2677,6 @@ export function LeanPlayground({
           )}
         </div>
       </div>
-
-      {isRemixSaveModalOpen && (
-        <div
-          className="playground-remix-save-backdrop"
-          onClick={() => setIsRemixSaveModalOpen(false)}
-        >
-          <div
-            className="glass-panel playground-remix-save-modal"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="playground-remix-save-header">
-              <div>
-                <div className="proof-section-heading">
-                  <Sparkles size={16} color="var(--secondary-accent)" />
-                  <span>Save Remix</span>
-                </div>
-                <div className="proof-helper-text">
-                  Choose where the first saved version of this remix should live.
-                </div>
-              </div>
-              <button
-                type="button"
-                className="playground-module-preview-close"
-                onClick={() => setIsRemixSaveModalOpen(false)}
-                aria-label="Close remix save dialog"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="playground-remix-save-options">
-              <button
-                type="button"
-                className={`playground-remix-save-option ${remixSaveDraft.mode === 'scratch' ? 'is-active' : ''}`}
-                onClick={() =>
-                  setRemixSaveDraft((current) => ({
-                    ...current,
-                    mode: 'scratch',
-                    overwriteConfirmed: false,
-                    conflictMessage: null,
-                  }))
-                }
-              >
-                <strong>Scratch verified entry</strong>
-                <span>Keep this as your own verified remix without attaching it to a target project.</span>
-              </button>
-              <button
-                type="button"
-                className={`playground-remix-save-option ${remixSaveDraft.mode === 'project' ? 'is-active' : ''}`}
-                onClick={() =>
-                  setRemixSaveDraft((current) => ({
-                    ...current,
-                    mode: 'project',
-                    projectKey: current.projectKey || resolveDefaultRemixProjectKey(),
-                    overwriteConfirmed: false,
-                    conflictMessage: null,
-                  }))
-                }
-              >
-                <strong>Save into my project</strong>
-                <span>Create or update a real project file first, then sync the remix to the verified database under that project.</span>
-              </button>
-            </div>
-
-            {remixSaveDraft.mode === 'project' && (
-              <div className="playground-remix-save-form">
-                <label className="playground-toolbar-group playground-title-field">
-                  <span>Project</span>
-                  <select
-                    className="input-field"
-                    value={remixSaveDraft.projectKey}
-                    onChange={(event) =>
-                      setRemixSaveDraft((current) => ({
-                        ...current,
-                        projectKey: event.target.value,
-                        overwriteConfirmed: false,
-                        conflictMessage: null,
-                      }))
-                    }
-                  >
-                    <option value="">
-                      {ownedProjects.length > 0 ? 'Select a project' : 'Create a project first'}
-                    </option>
-                    {ownedProjects.map((project) => (
-                      <option
-                        key={`${project.owner_slug}:${project.slug}`}
-                        value={`${project.owner_slug}:${project.slug}`}
-                      >
-                        {project.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="playground-toolbar-group playground-title-field">
-                  <span>File name</span>
-                  <input
-                    className="input-field"
-                    value={remixSaveDraft.fileTitle}
-                    onChange={(event) =>
-                      setRemixSaveDraft((current) => ({
-                        ...current,
-                        fileTitle: event.target.value,
-                        overwriteConfirmed: false,
-                        conflictMessage: null,
-                      }))
-                    }
-                    placeholder="Lean file name"
-                  />
-                </label>
-                <div className="proof-infoview-detail">
-                  The file name will be normalized into a module-safe Lean filename before saving.
-                </div>
-                {remixSaveDraft.conflictMessage && (
-                  <div className="playground-remix-save-conflict">
-                    {remixSaveDraft.conflictMessage}
-                  </div>
-                )}
-                {remixSaveDraft.conflictMessage &&
-                  remixSaveDraft.conflictMessage.includes('already exists') && (
-                    <label className="playground-remix-overwrite-toggle">
-                      <input
-                        type="checkbox"
-                        checked={remixSaveDraft.overwriteConfirmed}
-                        onChange={(event) =>
-                          setRemixSaveDraft((current) => ({
-                            ...current,
-                            overwriteConfirmed: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span>Overwrite the existing project file.</span>
-                    </label>
-                  )}
-              </div>
-            )}
-
-            {remixSaveDraft.mode === 'scratch' && (
-              <div className="playground-remix-save-form">
-                <div className="proof-infoview-detail">
-                  This keeps the remix independent from the source theorem or project. If the source used a project import context, that same context is still reused for validation.
-                </div>
-              </div>
-            )}
-
-            <div className="playground-module-preview-footer">
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => setIsRemixSaveModalOpen(false)}
-                disabled={isSubmittingRemixSave}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="button-primary"
-                onClick={() => void handleConfirmRemixSaveTarget()}
-                disabled={isSubmittingRemixSave}
-              >
-                {isSubmittingRemixSave ? (
-                  <LoaderCircle size={16} className="spin" />
-                ) : (
-                  <FileText size={16} />
-                )}
-                {isSubmittingRemixSave ? 'Preparing Save...' : 'Continue Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {editorError && <div className="auth-error">{editorError}</div>}
     </section>

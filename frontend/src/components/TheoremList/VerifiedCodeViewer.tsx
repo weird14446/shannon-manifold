@@ -23,7 +23,6 @@ import {
   getTheoremPdfUrl,
   type AuthUser,
   type IndexedProofDetail,
-  type RemixProvenancePayload,
   type TheoremPdfMappingItem,
   updateTheorem,
 } from '../../api';
@@ -59,7 +58,6 @@ interface VerifiedCodeViewerProps {
     projectModuleName?: string | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
-    remixProvenance?: RemixProvenancePayload | null;
   }) => void;
 }
 
@@ -140,35 +138,9 @@ export function VerifiedCodeViewer({
       return;
     }
 
-    const remixProvenance: RemixProvenancePayload = {
-      kind: 'theorem',
-      source_document_id: detail.id,
-      source_title: detail.title,
-      source_label: `theorem #${detail.id}`,
-      source_project_root: detail.project_root,
-      source_project_slug: detail.project_slug,
-      source_owner_slug: detail.project_owner_slug,
-      source_project_file_path: detail.project_file_path,
-      source_project_module_name: detail.project_module_name,
-      pdf_linked: detail.has_pdf,
-    };
-
     onOpenPlayground({
       code: detail.content,
       title: detail.title,
-      proofWorkspaceId: null,
-      pdfFilename: null,
-      linkedPdfFilename: detail.pdf_filename,
-      linkedPdfPreviewUrl: detail.has_pdf ? getTheoremPdfUrl(detail.id) : null,
-      linkedPdfDownloadUrl: detail.has_pdf ? getTheoremPdfUrl(detail.id, true) : null,
-      projectSlug: detail.project_slug,
-      projectOwnerSlug: detail.project_owner_slug,
-      projectTitle: detail.project_title,
-      projectRoot: detail.project_root,
-      packageName: detail.project_module_name?.split('.').at(0) ?? null,
-      projectFilePath: detail.project_file_path,
-      projectModuleName: detail.project_module_name,
-      remixProvenance,
     });
   };
 
@@ -434,6 +406,7 @@ export function VerifiedCodeViewer({
 
       <div className="verified-code-meta">
         <span className="proof-badge">{detail.proof_language}</span>
+        <span className="proof-badge">Cited by {detail.cited_by_count}</span>
         <span className="proof-badge">{detail.status}</span>
         <span className="proof-badge">{detail.source_kind.replace(/_/g, ' ')}</span>
         <span className={detail.can_edit ? 'proof-badge' : 'proof-readonly-pill'}>

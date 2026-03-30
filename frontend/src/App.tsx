@@ -6,7 +6,6 @@ import {
   type ChatCodeContextPayload,
   getCurrentUser,
   hasStoredToken,
-  type RemixProvenancePayload,
   setAuthToken,
   type AuthResponse,
   type AuthUser,
@@ -36,24 +35,6 @@ interface DashboardProjectFilterOption {
   label: string;
 }
 
-type RemixSaveTargetState =
-  | {
-      kind: 'scratch';
-      validation_project_root: string | null;
-      validation_project_file_path: string | null;
-    }
-  | {
-      kind: 'project';
-      target_project_slug: string;
-      target_project_owner_slug: string;
-      target_project_title: string;
-      target_project_root: string;
-      target_project_file_path: string;
-      target_project_module_name: string;
-      validation_project_root: string;
-      validation_project_file_path: string;
-    };
-
 interface PlaygroundSeed {
   code: string;
   revision: number;
@@ -75,8 +56,6 @@ interface PlaygroundSeed {
   projectModuleName?: string | null;
   projectEntryFilePath?: string | null;
   projectEntryModuleName?: string | null;
-  remixProvenance?: RemixProvenancePayload | null;
-  remixSaveTarget?: RemixSaveTargetState | null;
 }
 
 type PlaygroundSessionMetadata = Omit<PlaygroundSeed, 'code' | 'revision'>;
@@ -332,8 +311,6 @@ function App() {
     projectModuleName?: string | null;
     projectEntryFilePath?: string | null;
     projectEntryModuleName?: string | null;
-    remixProvenance?: RemixProvenancePayload | null;
-    remixSaveTarget?: RemixSaveTargetState | null;
   }) => {
     if (seed?.code || seed?.projectSlug) {
       setPlaygroundSeed({
@@ -357,8 +334,6 @@ function App() {
         projectModuleName: seed.projectModuleName ?? null,
         projectEntryFilePath: seed.projectEntryFilePath ?? null,
         projectEntryModuleName: seed.projectEntryModuleName ?? null,
-        remixProvenance: seed.remixProvenance ?? null,
-        remixSaveTarget: seed.remixSaveTarget ?? null,
       });
       setPlaygroundSessionMetadata({
         title: seed.title,
@@ -379,8 +354,6 @@ function App() {
         projectModuleName: seed.projectModuleName ?? null,
         projectEntryFilePath: seed.projectEntryFilePath ?? null,
         projectEntryModuleName: seed.projectEntryModuleName ?? null,
-        remixProvenance: seed.remixProvenance ?? null,
-        remixSaveTarget: seed.remixSaveTarget ?? null,
       });
     } else {
       setPlaygroundSeed(null);
@@ -426,8 +399,6 @@ function App() {
         projectModuleName: metadata.projectModuleName ?? null,
         projectEntryFilePath: metadata.projectEntryFilePath ?? null,
         projectEntryModuleName: metadata.projectEntryModuleName ?? null,
-        remixProvenance: metadata.remixProvenance ?? null,
-        remixSaveTarget: metadata.remixSaveTarget ?? null,
       });
       return;
     }

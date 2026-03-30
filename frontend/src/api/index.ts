@@ -152,6 +152,7 @@ export interface IndexedProofSummary {
   project_owner_slug: string | null;
   project_file_path: string | null;
   project_module_name: string | null;
+  cited_by_count: number;
 }
 
 export interface IndexedProofDetail extends IndexedProofSummary {
@@ -315,6 +316,7 @@ export interface LeanImportGraphNode {
   path: string | null;
   title: string;
   imports: number;
+  cited_by_count: number;
   source_kind: string;
   project_root: string | null;
   project_slug: string | null;

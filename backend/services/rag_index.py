@@ -148,6 +148,78 @@ def _parse_document_metadata(document: CodeDocument) -> dict[str, Any]:
     return parsed_metadata if isinstance(parsed_metadata, dict) else {}
 
 
+def resolve_verified_document_identity(
+    document: CodeDocument,
+) -> tuple[str, str | None, dict[str, Any]]:
+    metadata = _parse_document_metadata(document)
+    project_module_name = metadata.get("project_module_name")
+    project_file_path = metadata.get("project_file_path")
+    module_name = (
+        str(project_module_name).strip()
+        if isinstance(project_module_name, str) and str(project_module_name).strip()
+        else module_name_from_project_path(project_file_path)
+        if isinstance(project_file_path, str) and project_file_path.strip()
+        else (document.module_name or document.title)
+    )
+
+    effective_path: str | None = document.path
+    project_root = metadata.get("project_root")
+    if (
+        isinstance(project_root, str)
+        and project_root.strip()
+        and isinstance(project_file_path, str)
+        and project_file_path.strip()
+    ):
+        effective_path = f"{project_root.rstrip('/')}/{Path(project_file_path).as_posix().lstrip('/')}"
+
+    return module_name, effective_path, metadata
+
+
+def build_verified_module_index(
+    documents: list[CodeDocument],
+) -> tuple[dict[str, CodeDocument], dict[int, tuple[str, str | None, dict[str, Any]]]]:
+    module_index: dict[str, CodeDocument] = {}
+    module_identity_by_id: dict[int, tuple[str, str | None, dict[str, Any]]] = {}
+
+    for document in documents:
+        module_name, effective_path, metadata = resolve_verified_document_identity(document)
+        existing = module_index.get(module_name)
+        if existing is not None and existing.owner_id is None and document.owner_id is not None:
+            module_index[module_name] = document
+        elif existing is None:
+            module_index[module_name] = document
+        module_identity_by_id[document.id] = (module_name, effective_path, metadata)
+
+    return module_index, module_identity_by_id
+
+
+def build_import_citation_counts(documents: list[CodeDocument]) -> dict[str, int]:
+    module_index, module_identity_by_id = build_verified_module_index(documents)
+    citation_counts = {module_name: 0 for module_name in module_index}
+
+    for module_name, document in module_index.items():
+        _, _, metadata = module_identity_by_id[document.id]
+        seen_imports: set[str] = set()
+        raw_imports = metadata.get("imports", [])
+        if not isinstance(raw_imports, list):
+            continue
+
+        for imported_module in raw_imports:
+            if not isinstance(imported_module, str):
+                continue
+            normalized_module = imported_module.strip()
+            if (
+                not normalized_module
+                or normalized_module not in citation_counts
+                or normalized_module in seen_imports
+            ):
+                continue
+            citation_counts[normalized_module] += 1
+            seen_imports.add(normalized_module)
+
+    return citation_counts
+
+
 def _project_file_path_from_verified_document(
     document: CodeDocument,
     *,
@@ -1039,11 +1111,10 @@ def build_import_graph(
     documents = query.order_by(CodeDocument.module_name.asc(), CodeDocument.id.asc()).all()
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
-    module_index: dict[str, CodeDocument] = {}
-    module_identity_by_id: dict[int, tuple[str, str | None, dict[str, Any]]] = {}
+    visible_documents: list[CodeDocument] = []
 
     for document in documents:
-        metadata = _parse_document_metadata(document)
+        _, _, metadata = resolve_verified_document_identity(document)
         project_root = metadata.get("project_root")
         if (
             isinstance(project_root, str)
@@ -1051,30 +1122,10 @@ def build_import_graph(
             and project_root not in visible_project_roots
         ):
             continue
-        project_module_name = metadata.get("project_module_name")
-        project_file_path = metadata.get("project_file_path")
-        module_name = (
-            str(project_module_name).strip()
-            if isinstance(project_module_name, str) and str(project_module_name).strip()
-            else module_name_from_project_path(project_file_path)
-            if isinstance(project_file_path, str) and project_file_path.strip()
-            else (document.module_name or document.title)
-        )
-        existing = module_index.get(module_name)
-        if existing is not None and existing.owner_id is None and document.owner_id is not None:
-            module_index[module_name] = document
-        elif existing is None:
-            module_index[module_name] = document
-        effective_path: str | None = document.path
-        project_root = metadata.get("project_root")
-        if (
-            isinstance(project_root, str)
-            and project_root.strip()
-            and isinstance(project_file_path, str)
-            and project_file_path.strip()
-        ):
-            effective_path = f"{project_root.rstrip('/')}/{Path(project_file_path).as_posix().lstrip('/')}"
-        module_identity_by_id[document.id] = (module_name, effective_path, metadata)
+        visible_documents.append(document)
+
+    module_index, module_identity_by_id = build_verified_module_index(visible_documents)
+    citation_counts = build_import_citation_counts(visible_documents)
 
     for module_name, document in module_index.items():
         _, effective_path, metadata = module_identity_by_id[document.id]
@@ -1089,6 +1140,7 @@ def build_import_graph(
                 "path": effective_path,
                 "title": document.title,
                 "imports": len(imports),
+                "cited_by_count": citation_counts.get(module_name, 0),
                 "source_kind": document.source_kind,
                 "project_root": metadata.get("project_root")
                 or (project_scope["project_root"] if project_scope is not None else None),

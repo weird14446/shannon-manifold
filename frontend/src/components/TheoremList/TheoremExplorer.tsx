@@ -179,7 +179,7 @@ export function TheoremExplorer({
                 <div className="theorem-card-title-group">
                   <div className="theorem-card-title">{proof.title}</div>
                   <div className="theorem-card-meta">
-                    {proof.module_name ?? proof.path ?? 'Workspace module'}
+                    {proof.project_module_name ?? proof.module_name ?? proof.path ?? 'Workspace module'}
                     {proof.project_root
                       ? ` · ${proof.project_owner_slug ? `${proof.project_owner_slug} / ` : ''}${proof.project_title ?? proof.project_slug ?? proof.project_root}`
                       : ''}
@@ -187,6 +187,7 @@ export function TheoremExplorer({
                 </div>
                 <div className="theorem-card-statuses">
                   <span className="proof-badge">{proof.proof_language}</span>
+                  <span className="proof-badge">Cited by {proof.cited_by_count}</span>
                   {proof.project_root && <span className="proof-badge">project</span>}
                   <span className={proof.can_edit ? 'proof-badge' : 'proof-readonly-pill'}>
                     {proof.can_edit && currentUser ? (
