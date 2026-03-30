@@ -3,5 +3,5 @@
   "package_name": "User2Test",
   "slug": "test",
   "title": "Test",
-  "visibility": "public"
+  "visibility": "private"
 }

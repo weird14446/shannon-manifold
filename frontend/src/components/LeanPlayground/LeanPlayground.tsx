@@ -578,6 +578,7 @@ export function LeanPlayground({
   );
   const [availableProjects, setAvailableProjects] = useState<ProjectSummary[]>([]);
   const [projectModules, setProjectModules] = useState<ProjectModule[]>([]);
+  const [projectModuleQuery, setProjectModuleQuery] = useState('');
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [isLoadingProjectModules, setIsLoadingProjectModules] = useState(false);
   const [openingProjectModulePath, setOpeningProjectModulePath] = useState<string | null>(null);
@@ -648,6 +649,17 @@ export function LeanPlayground({
       savedWorkspacePath,
     ],
   );
+  const normalizedProjectModuleQuery = projectModuleQuery.trim().toLowerCase();
+  const filteredProjectModules = useMemo(() => {
+    if (!normalizedProjectModuleQuery) {
+      return projectModules;
+    }
+
+    return projectModules.filter((module) => {
+      const haystacks = [module.title, module.path, module.module_name];
+      return haystacks.some((value) => value.toLowerCase().includes(normalizedProjectModuleQuery));
+    });
+  }, [normalizedProjectModuleQuery, projectModules]);
   const selectableProjects = useMemo(() => {
     const ownedProjects = availableProjects.filter((project) => project.can_edit);
     if (
@@ -736,6 +748,7 @@ export function LeanPlayground({
   };
 
   const applyProjectSelection = (project: ProjectSummary | null) => {
+    setProjectModuleQuery('');
     setPreviewModuleDetail(null);
     setPreviewModuleError('');
     setPreviewModulePath(null);
@@ -2251,6 +2264,15 @@ export function LeanPlayground({
                   <div className="proof-helper-text">
                     Browse the verified Lean modules inside the selected project.
                   </div>
+                  <label className="playground-module-search-field">
+                    <span>Search modules</span>
+                    <input
+                      className="input-field"
+                      value={projectModuleQuery}
+                      onChange={(event) => setProjectModuleQuery(event.target.value)}
+                      placeholder="Filter by title, path, or module"
+                    />
+                  </label>
                 </div>
                 <div className="playground-module-list">
                   {isLoadingProjectModules ? (
@@ -2262,8 +2284,12 @@ export function LeanPlayground({
                     <div className="theorem-empty-state">
                       No verified Lean modules were found in this project yet.
                     </div>
+                  ) : filteredProjectModules.length === 0 ? (
+                    <div className="theorem-empty-state">
+                      No verified modules match the current search.
+                    </div>
                   ) : (
-                    projectModules.map((module) => {
+                    filteredProjectModules.map((module) => {
                       const isActive = module.path === savedWorkspacePath;
                       const isOpening = module.path === openingProjectModulePath;
                       return (
@@ -2320,6 +2346,7 @@ export function LeanPlayground({
             </aside>
             {isAuxiliaryUiVisible && (
               <aside className="playground-sidebar-panel">
+                <div className="playground-sidebar-scroll">
                 <div className="playground-sidebar-section">
                   <label className="playground-toolbar-group playground-title-field">
                     <span>Project</span>
@@ -2367,21 +2394,6 @@ export function LeanPlayground({
                       title={currentTitle}
                     />
                   </label>
-                  <div className="playground-file-name-meta">
-                    {isProjectMode && (
-                      <div className="proof-infoview-detail">
-                        Lean file names are normalized into module-safe names inside the selected project.
-                      </div>
-                    )}
-                    <div className="proof-infoview-detail">Resolved workspace file</div>
-                    <div className="playground-inline-scroll-code" title={displayedWorkspaceTarget.path}>
-                      {displayedWorkspaceTarget.path}
-                    </div>
-                    <div className="proof-infoview-detail">Resolved module name</div>
-                    <div className="playground-inline-scroll-code" title={displayedWorkspaceTarget.module}>
-                      {displayedWorkspaceTarget.module}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="playground-sidebar-section">
@@ -2663,6 +2675,7 @@ export function LeanPlayground({
                       The Lean server runs in the dedicated Docker service on port 8080.
                     </div>
                   </div>
+                </div>
                 </div>
               </aside>
             )}

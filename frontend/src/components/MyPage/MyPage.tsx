@@ -40,7 +40,46 @@ interface MyStats {
   verifiedCodeCount: number;
   proofWorkspaceCount: number;
   pdfWorkspaceCount: number;
+  hIndex: number;
+  gIndex: number;
 }
+
+const normalizeCitationCounts = (proofs: IndexedProofSummary[]) =>
+  proofs
+    .map((proof) => Math.max(0, proof.cited_by_count ?? 0))
+    .sort((left, right) => right - left);
+
+const computeHIndex = (proofs: IndexedProofSummary[]) => {
+  const citationCounts = normalizeCitationCounts(proofs);
+  let hIndex = 0;
+
+  for (let index = 0; index < citationCounts.length; index += 1) {
+    const rank = index + 1;
+    if (citationCounts[index] >= rank) {
+      hIndex = rank;
+    } else {
+      break;
+    }
+  }
+
+  return hIndex;
+};
+
+const computeGIndex = (proofs: IndexedProofSummary[]) => {
+  const citationCounts = normalizeCitationCounts(proofs);
+  let gIndex = 0;
+  let runningCitationSum = 0;
+
+  for (let index = 0; index < citationCounts.length; index += 1) {
+    runningCitationSum += citationCounts[index];
+    const rank = index + 1;
+    if (runningCitationSum >= rank * rank) {
+      gIndex = rank;
+    }
+  }
+
+  return gIndex;
+};
 
 export function MyPage({
   currentUser,
@@ -117,6 +156,8 @@ export function MyPage({
       verifiedCodeCount: proofs.length,
       proofWorkspaceCount: workspaces.length,
       pdfWorkspaceCount: workspaces.filter((workspace) => workspace.has_pdf).length,
+      hIndex: computeHIndex(proofs),
+      gIndex: computeGIndex(proofs),
     }),
     [projects, proofs, workspaces],
   );
@@ -244,7 +285,7 @@ export function MyPage({
             </div>
             <div>
               <h3>Workspace Stats</h3>
-              <p>Your current footprint across projects, proofs, and verified Lean code.</p>
+              <p>Your current footprint and import-based impact across projects and verified Lean code.</p>
             </div>
           </div>
 
@@ -270,6 +311,14 @@ export function MyPage({
               <div className="account-stat-card">
                 <span>Verified Code</span>
                 <strong>{stats.verifiedCodeCount}</strong>
+              </div>
+              <div className="account-stat-card">
+                <span>h-index</span>
+                <strong>{stats.hIndex}</strong>
+              </div>
+              <div className="account-stat-card">
+                <span>g-index</span>
+                <strong>{stats.gIndex}</strong>
               </div>
               <div className="account-stat-card">
                 <span>Proof Workspaces</span>

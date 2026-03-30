@@ -2753,6 +2753,18 @@ h6 {
   border-bottom: var(--glass-border);
 }
 
+.playground-module-search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.playground-module-search-field span {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
 .playground-module-preview-overlay {
   position: absolute;
   inset: 0;
@@ -3135,45 +3147,34 @@ h6 {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px 18px;
   border-left: var(--glass-border);
   background: rgba(9, 12, 20, 0.94);
+  overflow: hidden;
+}
+
+.playground-sidebar-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .playground-sidebar-section {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  flex: 0 0 auto;
 }
 
 .playground-file-name-input {
   direction: ltr;
   text-overflow: clip;
   font-family: 'SFMono-Regular', 'Menlo', monospace;
-}
-
-.playground-file-name-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.playground-inline-scroll-code {
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(4, 7, 13, 0.72);
-  color: var(--text-secondary);
-  font-family: 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 0.82rem;
-  line-height: 1.4;
-  scrollbar-width: thin;
 }
 
 .playground-save-card {
@@ -3191,7 +3192,6 @@ h6 {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  overflow: auto;
 }
 
 .playground-sidebar-meta {
@@ -3405,6 +3405,10 @@ h6 {
     border-top: var(--glass-border);
   }
 
+  .playground-sidebar-scroll {
+    padding: 16px 18px 18px;
+  }
+
   .playground-infoview-host {
     min-height: 280px;
   }
@@ -3455,6 +3459,10 @@ h6 {
   }
 
   .playground-sidebar-panel {
+    padding: 0;
+  }
+
+  .playground-sidebar-scroll {
     padding: 14px;
   }
 
