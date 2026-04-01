@@ -16,11 +16,9 @@ import {
   getTheorems,
   listProjects,
   listProofWorkspaces,
-  openProject,
   updateCurrentUser,
   type AuthUser,
   type IndexedProofSummary,
-  type ProjectOpenResponse,
   type ProjectSummary,
   type ProofWorkspaceSummary,
 } from '../../api';
@@ -29,7 +27,7 @@ interface MyPageProps {
   currentUser: AuthUser | null;
   onOpenAuth: () => void;
   onOpenProof: (proofId: number) => void;
-  onOpenProject: (project: ProjectOpenResponse) => void;
+  onOpenProject: (ownerSlug: string, projectSlug: string) => void;
   onUserUpdated: (user: AuthUser) => void;
 }
 
@@ -95,7 +93,6 @@ export function MyPage({
   const [error, setError] = useState('');
   const [profileName, setProfileName] = useState(currentUser?.full_name ?? '');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [isOpeningProjectRoot, setIsOpeningProjectRoot] = useState<string | null>(null);
 
   useEffect(() => {
     setProfileName(currentUser?.full_name ?? '');
@@ -176,19 +173,6 @@ export function MyPage({
       setError(saveError?.response?.data?.detail ?? 'Failed to update your profile.');
     } finally {
       setIsSavingProfile(false);
-    }
-  };
-
-  const handleOpenProject = async (project: ProjectSummary) => {
-    setIsOpeningProjectRoot(project.project_root);
-    setError('');
-    try {
-      const opened = await openProject(project.slug, null, project.owner_slug);
-      onOpenProject(opened);
-    } catch (openError: any) {
-      setError(openError?.response?.data?.detail ?? 'Failed to open the selected project.');
-    } finally {
-      setIsOpeningProjectRoot(null);
     }
   };
 
@@ -374,14 +358,9 @@ export function MyPage({
                     <button
                       type="button"
                       className="button-secondary"
-                      onClick={() => void handleOpenProject(project)}
-                      disabled={isOpeningProjectRoot === project.project_root}
+                      onClick={() => onOpenProject(project.owner_slug, project.slug)}
                     >
-                      {isOpeningProjectRoot === project.project_root ? (
-                        <LoaderCircle size={16} className="spin" />
-                      ) : (
-                        <FolderKanban size={16} />
-                      )}
+                      <FolderKanban size={16} />
                       Open Project
                     </button>
                     {project.github_url && (

@@ -31,6 +31,7 @@ interface ProjectPanelProps {
   currentUser: AuthUser | null;
   onClose?: () => void;
   onOpenAuth: () => void;
+  initialSelectedProjectKey?: string | null;
 }
 
 export function ProjectPanel({
@@ -39,6 +40,7 @@ export function ProjectPanel({
   currentUser,
   onClose,
   onOpenAuth,
+  initialSelectedProjectKey = null,
 }: ProjectPanelProps) {
   const isVisible = variant === 'page' ? true : Boolean(isOpen);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -79,6 +81,13 @@ export function ProjectPanel({
     setSelectedProjectDetail(null);
     setError('');
   }, [isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+    setSelectedProjectKey(initialSelectedProjectKey ?? null);
+  }, [initialSelectedProjectKey, isVisible]);
 
   useEffect(() => {
     if (!isVisible) {

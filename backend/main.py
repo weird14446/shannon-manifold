@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import models  # noqa: F401
 from config import get_settings
 from database import Base, SessionLocal, engine
-from routers import admin, auth, chat, discussions, lean_workspace, proofs, projects, theorems
+from routers import admin, auth, chat, community, discussions, lean_workspace, proofs, projects, theorems
 from services.admin_bootstrap import bootstrap_admin_user, ensure_user_auth_columns
 from services.project_workspace import backfill_existing_project_scaffolds
 from services.rag_index import (
@@ -68,6 +68,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(proofs.router)
 app.include_router(theorems.router)
+app.include_router(community.router)
 app.include_router(discussions.router)
 app.include_router(chat.router)
 app.include_router(lean_workspace.router)

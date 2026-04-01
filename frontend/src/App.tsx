@@ -9,11 +9,13 @@ import {
   setAuthToken,
   type AuthResponse,
   type AuthUser,
-  type ProjectOpenResponse,
 } from './api';
 import { AdminPage } from './components/Admin/AdminPage';
 import { AuthPanel } from './components/Auth/AuthPanel';
 import { Chatbot } from './components/Chatbot/Chatbot';
+import { CommunityComposer } from './components/Community/CommunityComposer';
+import { CommunityHome } from './components/Community/CommunityHome';
+import { CommunityPostDetail } from './components/Community/CommunityPostDetail';
 import { RecoverableErrorBoundary } from './components/ErrorBoundary/RecoverableErrorBoundary';
 import { MyPage } from './components/MyPage/MyPage';
 import { AgentGraph, type GraphProjectFilterOption } from './components/AgentGraph/AgentGraph';
@@ -21,7 +23,7 @@ import { ProjectPanel } from './components/ProjectPanel/ProjectPanel';
 import { TheoremExplorer, type TheoremProjectFilterOption } from './components/TheoremList/TheoremExplorer';
 import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
 
-type AppView = 'dashboard' | 'projects' | 'playground' | 'code' | 'admin' | 'my';
+type AppView = 'dashboard' | 'community' | 'projects' | 'playground' | 'code' | 'admin' | 'my';
 const CHAT_POPOVER_MIN_WIDTH = 360;
 const CHAT_POPOVER_MIN_HEIGHT = 420;
 
@@ -33,6 +35,11 @@ interface ChatPopoverSize {
 interface DashboardProjectFilterOption {
   value: string;
   label: string;
+}
+
+interface CommunityRouteState {
+  mode: 'home' | 'detail' | 'compose';
+  postId: number | null;
 }
 
 interface PlaygroundSeed {
@@ -66,7 +73,14 @@ const getInitialView = (): AppView => {
   }
 
   const view = new URLSearchParams(window.location.search).get('view');
-  if (view === 'projects' || view === 'playground' || view === 'code' || view === 'admin' || view === 'my') {
+  if (
+    view === 'community' ||
+    view === 'projects' ||
+    view === 'playground' ||
+    view === 'code' ||
+    view === 'admin' ||
+    view === 'my'
+  ) {
     return view;
   }
 
@@ -89,6 +103,34 @@ const getInitialDocumentId = (): number | null => {
 
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const getInitialCommunityRoute = (): CommunityRouteState => {
+  if (typeof window === 'undefined') {
+    return { mode: 'home', postId: null };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const composeValue = params.get('communityCompose');
+  if (composeValue) {
+    if (composeValue === 'new') {
+      return { mode: 'compose', postId: null };
+    }
+    const parsedComposeId = Number(composeValue);
+    if (Number.isInteger(parsedComposeId) && parsedComposeId > 0) {
+      return { mode: 'compose', postId: parsedComposeId };
+    }
+  }
+
+  const detailValue = params.get('communityPost');
+  if (detailValue) {
+    const parsedDetailId = Number(detailValue);
+    if (Number.isInteger(parsedDetailId) && parsedDetailId > 0) {
+      return { mode: 'detail', postId: parsedDetailId };
+    }
+  }
+
+  return { mode: 'home', postId: null };
 };
 
 const getInitialPlaygroundSeed = (): PlaygroundSeed | null => {
@@ -130,12 +172,17 @@ function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isBootstrappingSession, setIsBootstrappingSession] = useState(true);
   const [currentView, setCurrentView] = useState<AppView>(() => getInitialView());
+  const [communityRoute, setCommunityRoute] = useState<CommunityRouteState>(() =>
+    getInitialCommunityRoute(),
+  );
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(() =>
     getInitialDocumentId(),
   );
+  const [codeBackView, setCodeBackView] = useState<AppView>('dashboard');
   const [playgroundSeed, setPlaygroundSeed] = useState<PlaygroundSeed | null>(() =>
     getInitialPlaygroundSeed(),
   );
+  const [projectPanelSelectedKey, setProjectPanelSelectedKey] = useState<string | null>(null);
   const [playgroundSessionMetadata, setPlaygroundSessionMetadata] = useState<PlaygroundSessionMetadata | null>(
     null,
   );
@@ -266,8 +313,24 @@ function App() {
       url.searchParams.delete('document');
     }
 
+    if (currentView === 'community') {
+      if (communityRoute.mode === 'detail' && communityRoute.postId) {
+        url.searchParams.set('communityPost', String(communityRoute.postId));
+        url.searchParams.delete('communityCompose');
+      } else if (communityRoute.mode === 'compose') {
+        url.searchParams.set('communityCompose', communityRoute.postId ? String(communityRoute.postId) : 'new');
+        url.searchParams.delete('communityPost');
+      } else {
+        url.searchParams.delete('communityPost');
+        url.searchParams.delete('communityCompose');
+      }
+    } else {
+      url.searchParams.delete('communityPost');
+      url.searchParams.delete('communityCompose');
+    }
+
     window.history.replaceState({}, '', url);
-  }, [currentView, playgroundSeed, selectedDocumentId]);
+  }, [communityRoute, currentView, playgroundSeed, selectedDocumentId]);
 
   const handleAuthenticated = (payload: AuthResponse) => {
     setAuthToken(payload.access_token);
@@ -364,8 +427,29 @@ function App() {
   };
 
   const openVerifiedCode = (documentId: number) => {
+    setCodeBackView(currentView);
     setSelectedDocumentId(documentId);
     setCurrentView('code');
+  };
+
+  const openCommunityHome = () => {
+    setCommunityRoute({ mode: 'home', postId: null });
+    setCurrentView('community');
+  };
+
+  const openCommunityPost = (postId: number) => {
+    setCommunityRoute({ mode: 'detail', postId });
+    setCurrentView('community');
+  };
+
+  const openCommunityComposer = (postId?: number | null) => {
+    setCommunityRoute({ mode: 'compose', postId: postId ?? null });
+    setCurrentView('community');
+  };
+
+  const openProjectDetail = (ownerSlug: string, projectSlug: string) => {
+    setProjectPanelSelectedKey(`${ownerSlug}:${projectSlug}`);
+    setCurrentView('projects');
   };
 
   const handleRetryPlayground = () => {
@@ -406,25 +490,6 @@ function App() {
     openLeanPlayground({
       code: payload.code,
       title: payload.title,
-    });
-  };
-
-  const handleOpenProject = (project: ProjectOpenResponse) => {
-    openLeanPlayground({
-      code: project.content,
-      title: project.workspace_title,
-      projectSlug: project.slug,
-      projectOwnerSlug: project.owner_slug,
-      projectTitle: project.title,
-      projectRoot: project.project_root,
-      packageName: project.package_name,
-      projectGithubUrl: project.github_url,
-      projectVisibility: project.visibility,
-      projectCanEdit: project.can_edit,
-      projectFilePath: project.workspace_file_path,
-      projectModuleName: project.workspace_module_name,
-      projectEntryFilePath: project.entry_file_path,
-      projectEntryModuleName: project.entry_module_name,
     });
   };
 
@@ -523,8 +588,17 @@ function App() {
             </button>
           )}
           <button
+            className={`nav-pill ${currentView === 'community' ? 'is-active' : ''}`}
+            onClick={openCommunityHome}
+          >
+            Community
+          </button>
+          <button
             className={`nav-pill ${currentView === 'projects' ? 'is-active' : ''}`}
-            onClick={() => setCurrentView('projects')}
+            onClick={() => {
+              setProjectPanelSelectedKey(null);
+              setCurrentView('projects');
+            }}
           >
             Projects
           </button>
@@ -680,18 +754,53 @@ function App() {
               </section>
             </section>
           </section>
+        ) : currentView === 'community' ? (
+          communityRoute.mode === 'compose' ? (
+            <CommunityComposer
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              postId={communityRoute.postId}
+              onCancel={openCommunityHome}
+              onSaved={openCommunityPost}
+            />
+          ) : communityRoute.mode === 'detail' && communityRoute.postId ? (
+            <CommunityPostDetail
+              postId={communityRoute.postId}
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onBack={openCommunityHome}
+              onOpenProof={openVerifiedCode}
+              onOpenProject={openProjectDetail}
+              onEditPost={openCommunityComposer}
+              onDeleted={openCommunityHome}
+            />
+          ) : (
+            <CommunityHome
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onOpenPost={openCommunityPost}
+              onCompose={() => {
+                if (!currentUser) {
+                  setIsAuthOpen(true);
+                  return;
+                }
+                openCommunityComposer();
+              }}
+            />
+          )
         ) : currentView === 'projects' ? (
           <ProjectPanel
             variant="page"
             currentUser={currentUser}
             onOpenAuth={() => setIsAuthOpen(true)}
+            initialSelectedProjectKey={projectPanelSelectedKey}
           />
         ) : currentView === 'my' ? (
           <MyPage
             currentUser={currentUser}
             onOpenAuth={() => setIsAuthOpen(true)}
             onOpenProof={openVerifiedCode}
-            onOpenProject={handleOpenProject}
+            onOpenProject={openProjectDetail}
             onUserUpdated={handleUserUpdated}
           />
         ) : currentView === 'admin' ? (
@@ -705,7 +814,7 @@ function App() {
             <VerifiedCodeViewer
               currentUser={currentUser}
               documentId={selectedDocumentId}
-              onBack={() => setCurrentView('dashboard')}
+              onBack={() => setCurrentView(codeBackView)}
               onOpenAuth={() => setIsAuthOpen(true)}
               onOpenPlayground={openLeanPlayground}
             />

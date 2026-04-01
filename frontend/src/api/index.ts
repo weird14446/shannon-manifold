@@ -308,6 +308,62 @@ export interface RemixProvenancePayload {
   pdf_linked?: boolean;
 }
 
+export type CommunityCategory = 'note' | 'theorem_review' | 'project_log' | 'paper' | 'essay';
+export type CommunityPostStatus = 'draft' | 'published';
+
+export interface CommunityArtifact {
+  artifact_type: 'theorem' | 'project';
+  artifact_ref: string;
+  title: string;
+  subtitle: string;
+  theorem_id?: number | null;
+  project_root?: string | null;
+  project_slug?: string | null;
+  project_owner_slug?: string | null;
+  project_title?: string | null;
+}
+
+export interface CommunityPostSummary {
+  id: number;
+  author_id: number;
+  author_name: string;
+  title: string;
+  slug: string;
+  summary: string;
+  category: CommunityCategory;
+  tags: string[];
+  status: CommunityPostStatus;
+  is_featured: boolean;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+  primary_artifact: CommunityArtifact | null;
+  related_artifacts: CommunityArtifact[];
+  comment_count: number;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_publish: boolean;
+  can_feature: boolean;
+  can_comment: boolean;
+}
+
+export interface CommunityPostDetail extends CommunityPostSummary {
+  content_markdown: string;
+}
+
+export interface CommunityPostComment {
+  id: number;
+  post_id: number;
+  author_id: number;
+  author_name: string;
+  parent_id: number | null;
+  parent_author_name: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  can_delete: boolean;
+}
+
 export interface LeanImportGraphNode {
   id: string;
   document_id: number;
@@ -607,6 +663,102 @@ export const updateDiscussionThread = async (
 
 export const deleteDiscussionComment = async (commentId: number) => {
   await api.delete(`/discussions/comments/${commentId}`);
+};
+
+export const listCommunityPosts = async (params?: {
+  category?: CommunityCategory | null;
+  tag?: string | null;
+  status?: CommunityPostStatus | null;
+  featured_only?: boolean;
+  author_id?: number | null;
+  linked_type?: 'theorem' | 'project' | null;
+  linked_ref?: string | null;
+  search?: string | null;
+}) => {
+  const response = await api.get<CommunityPostSummary[]>('/community/posts', {
+    params,
+  });
+  return response.data;
+};
+
+export const getCommunityPost = async (postId: number) => {
+  const response = await api.get<CommunityPostDetail>(`/community/posts/${postId}`);
+  return response.data;
+};
+
+export const getCommunityPostBySlug = async (slug: string) => {
+  const response = await api.get<CommunityPostDetail>(`/community/posts/slug/${encodeURIComponent(slug)}`);
+  return response.data;
+};
+
+export const createCommunityPost = async (payload: {
+  title: string;
+  summary: string;
+  content_markdown: string;
+  category: CommunityCategory;
+  tags: string[];
+  primary_artifact?: { artifact_type: 'theorem' | 'project'; artifact_ref: string } | null;
+  related_artifacts?: Array<{ artifact_type: 'theorem' | 'project'; artifact_ref: string }>;
+}) => {
+  const response = await api.post<CommunityPostDetail>('/community/posts', payload);
+  return response.data;
+};
+
+export const updateCommunityPost = async (
+  postId: number,
+  payload: {
+    title: string;
+    summary: string;
+    content_markdown: string;
+    category: CommunityCategory;
+    tags: string[];
+    primary_artifact?: { artifact_type: 'theorem' | 'project'; artifact_ref: string } | null;
+    related_artifacts?: Array<{ artifact_type: 'theorem' | 'project'; artifact_ref: string }>;
+  },
+) => {
+  const response = await api.put<CommunityPostDetail>(`/community/posts/${postId}`, payload);
+  return response.data;
+};
+
+export const deleteCommunityPost = async (postId: number) => {
+  await api.delete(`/community/posts/${postId}`);
+};
+
+export const publishCommunityPost = async (postId: number, published = true) => {
+  const response = await api.post<CommunityPostDetail>(`/community/posts/${postId}/publish`, {
+    published,
+  });
+  return response.data;
+};
+
+export const featureCommunityPost = async (postId: number, is_featured: boolean) => {
+  const response = await api.post<CommunityPostDetail>(`/community/posts/${postId}/feature`, {
+    is_featured,
+  });
+  return response.data;
+};
+
+export const listCommunityPostComments = async (postId: number) => {
+  const response = await api.get<CommunityPostComment[]>(`/community/posts/${postId}/comments`);
+  return response.data;
+};
+
+export const createCommunityPostComment = async (
+  postId: number,
+  payload: {
+    body: string;
+    parent_id?: number | null;
+  },
+) => {
+  const response = await api.post<CommunityPostComment[]>(
+    `/community/posts/${postId}/comments`,
+    payload,
+  );
+  return response.data;
+};
+
+export const deleteCommunityPostComment = async (commentId: number) => {
+  await api.delete(`/community/comments/${commentId}`);
 };
 
 export const getLeanImportGraph = async () => {
