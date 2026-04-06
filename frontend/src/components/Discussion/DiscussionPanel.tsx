@@ -24,6 +24,7 @@ import {
   type DiscussionThreadDetail,
   type DiscussionThreadSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 
 type DiscussionScopeType = 'theorem' | 'project';
 type DiscussionAnchorType = 'general' | 'lean_decl' | 'pdf_page' | 'project_readme';
@@ -51,7 +52,6 @@ interface DiscussionCommentNode extends DiscussionComment {
   children: DiscussionCommentNode[];
 }
 
-const formatTimestamp = (value: string) => new Date(value).toLocaleString();
 const formatCommentCount = (count: number) => `${count} comment${count === 1 ? '' : 's'}`;
 
 const asNumber = (value: unknown) =>
@@ -138,6 +138,7 @@ export function DiscussionPanel({
   selectionRequiredMessage,
   onSummariesChange,
 }: DiscussionPanelProps) {
+  const { t, formatDateTime } = useI18n();
   const [threads, setThreads] = useState<DiscussionThreadSummary[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [selectedThread, setSelectedThread] = useState<DiscussionThreadDetail | null>(null);
@@ -278,7 +279,7 @@ export function DiscussionPanel({
     }
     const nextBody = newThreadBody.trim();
     if (!nextBody) {
-      setPanelError('Write a comment to start a discussion thread.');
+      setPanelError(t('Write a comment to start a discussion thread.'));
       return;
     }
 
@@ -298,7 +299,7 @@ export function DiscussionPanel({
       setIsThreadDetailOpen(true);
       await refreshThreads(response.id);
     } catch (error: any) {
-      setPanelError(error?.response?.data?.detail ?? 'Failed to create the discussion thread.');
+      setPanelError(error?.response?.data?.detail ?? t('Failed to create the discussion thread.'));
     } finally {
       setIsSubmittingThread(false);
     }
@@ -314,7 +315,7 @@ export function DiscussionPanel({
     }
     const nextBody = replyBody.trim();
     if (!nextBody) {
-      setPanelError('Write a reply before posting.');
+      setPanelError(t('Write a reply before posting.'));
       return;
     }
 
@@ -330,7 +331,7 @@ export function DiscussionPanel({
       setReplyParent(null);
       await refreshThreads(response.id);
     } catch (error: any) {
-      setPanelError(error?.response?.data?.detail ?? 'Failed to post the reply.');
+      setPanelError(error?.response?.data?.detail ?? t('Failed to post the reply.'));
     } finally {
       setIsSubmittingReply(false);
     }
@@ -347,7 +348,7 @@ export function DiscussionPanel({
       setSelectedThread(response);
       await refreshThreads(response.id);
     } catch (error: any) {
-      setPanelError(error?.response?.data?.detail ?? 'Failed to update the discussion status.');
+      setPanelError(error?.response?.data?.detail ?? t('Failed to update the discussion status.'));
     }
   };
 
@@ -357,7 +358,7 @@ export function DiscussionPanel({
   };
 
   const handleDeleteComment = async (commentId: number) => {
-    if (typeof window !== 'undefined' && !window.confirm('Delete this comment?')) {
+    if (typeof window !== 'undefined' && !window.confirm(t('Delete this comment?'))) {
       return;
     }
     try {
@@ -377,7 +378,7 @@ export function DiscussionPanel({
         setSelectedThreadId(null);
       }
     } catch (error: any) {
-      setPanelError(error?.response?.data?.detail ?? 'Failed to delete the comment.');
+      setPanelError(error?.response?.data?.detail ?? t('Failed to delete the comment.'));
     }
   };
 
@@ -387,7 +388,7 @@ export function DiscussionPanel({
         <div className="discussion-comment-head">
           <div>
             <strong>{comment.author_name}</strong>
-            <div className="discussion-thread-card-meta">{formatTimestamp(comment.created_at)}</div>
+            <div className="discussion-thread-card-meta">{formatDateTime(comment.created_at)}</div>
           </div>
           <div className="discussion-comment-actions">
             {currentUser ? (
@@ -397,7 +398,7 @@ export function DiscussionPanel({
                 onClick={() => setReplyParent(comment)}
               >
                 <CornerDownRight size={14} />
-                Reply
+                {t('Reply')}
               </button>
             ) : null}
             {comment.can_delete ? (
@@ -407,7 +408,7 @@ export function DiscussionPanel({
                 onClick={() => void handleDeleteComment(comment.id)}
               >
                 <Trash2 size={14} />
-                Delete
+                {t('Delete')}
               </button>
             ) : null}
           </div>
@@ -415,7 +416,7 @@ export function DiscussionPanel({
         {comment.parent_author_name ? (
           <div className="discussion-thread-card-meta discussion-comment-context">
             <CornerDownRight size={13} />
-            Replying to {comment.parent_author_name}
+            {t('Replying to {name}', { name: comment.parent_author_name })}
           </div>
         ) : null}
         <p className="discussion-comment-body">{comment.body}</p>
@@ -438,7 +439,7 @@ export function DiscussionPanel({
           </div>
           <p className="discussion-panel-copy">
             {anchorType === 'general'
-              ? 'Discuss the current artifact as a whole.'
+              ? t('Discuss the current artifact as a whole.')
               : currentAnchor
                 ? currentAnchor.label
                 : selectionRequiredMessage || emptyMessage}
@@ -452,14 +453,14 @@ export function DiscussionPanel({
         {!currentUser ? (
           <div className="discussion-locked-copy">
             <LockKeyhole size={14} />
-            Sign in to start a thread or reply.
+            {t('Sign in to start a thread or reply.')}
             <button type="button" className="button-secondary" onClick={onOpenAuth}>
-              Login / Register
+              {t('Login / Register')}
             </button>
           </div>
         ) : !canCreateThread ? (
           <div className="discussion-panel-copy">
-            {selectionRequiredMessage || 'Select an anchor before starting a discussion thread.'}
+            {selectionRequiredMessage || t('Select an anchor before starting a discussion thread.')}
           </div>
         ) : (
           <>
@@ -467,7 +468,11 @@ export function DiscussionPanel({
               className="proof-textarea discussion-composer-textarea"
               value={newThreadBody}
               onChange={(event) => setNewThreadBody(event.target.value)}
-              placeholder={`Start a new ${anchorType === 'general' ? 'discussion' : 'anchored discussion'}...`}
+              placeholder={
+                anchorType === 'general'
+                  ? t('Start a new discussion...')
+                  : t('Start a new anchored discussion...')
+              }
             />
             <div className="discussion-composer-actions">
               <button
@@ -477,7 +482,7 @@ export function DiscussionPanel({
                 disabled={isSubmittingThread}
               >
                 {isSubmittingThread ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}
-                Start Thread
+                {t('Start Thread')}
               </button>
             </div>
           </>
@@ -489,7 +494,7 @@ export function DiscussionPanel({
           {isLoadingThreads ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={16} className="spin" />
-              Loading threads...
+              {t('Loading threads...')}
             </div>
           ) : visibleThreads.length === 0 ? (
             <div className="theorem-empty-state">{emptyMessage}</div>
@@ -514,11 +519,11 @@ export function DiscussionPanel({
                   </div>
                   <div className="discussion-thread-card-badges">
                     {thread.status === 'resolved' ? (
-                      <span className="proof-badge">Resolved</span>
+                      <span className="proof-badge">{t('Resolved')}</span>
                     ) : (
-                      <span className="proof-badge">Active</span>
+                      <span className="proof-badge">{t('Active')}</span>
                     )}
-                    {thread.is_outdated ? <span className="proof-readonly-pill">Outdated</span> : null}
+                    {thread.is_outdated ? <span className="proof-readonly-pill">{t('Outdated')}</span> : null}
                   </div>
                 </div>
                 <div className="discussion-thread-card-meta">
@@ -529,11 +534,15 @@ export function DiscussionPanel({
                 ) : null}
                 <div className="discussion-thread-card-footer">
                   <div className="discussion-thread-card-meta">
-                    Updated {formatTimestamp(thread.latest_activity_at)}
+                    {t('Updated {timestamp}', {
+                      timestamp: formatDateTime(thread.latest_activity_at),
+                    })}
                   </div>
                   <div className="discussion-thread-card-hint">
                     <MessageSquare size={13} />
-                    {thread.id === selectedThreadId && isThreadDetailOpen ? 'Opened' : 'Open thread'}
+                    {thread.id === selectedThreadId && isThreadDetailOpen
+                      ? t('Opened')
+                      : t('Open thread')}
                   </div>
                 </div>
               </article>
@@ -548,17 +557,20 @@ export function DiscussionPanel({
                   {isLoadingThread ? (
                     <div className="theorem-empty-state">
                       <LoaderCircle size={16} className="spin" />
-                      Loading discussion...
+                      {t('Loading discussion...')}
                     </div>
                   ) : !selectedThread ? (
-                    <div className="theorem-empty-state">Discussion thread not found.</div>
+                    <div className="theorem-empty-state">{t('Discussion thread not found.')}</div>
                   ) : (
                     <>
                       <div className="discussion-thread-detail-header">
                         <div>
                           <div className="discussion-thread-detail-title">{selectedThread.anchor_label}</div>
                           <div className="discussion-thread-card-meta">
-                            Started by {selectedThread.created_by_name} · {formatTimestamp(selectedThread.created_at)}
+                            {t('Started by {name} · {timestamp}', {
+                              name: selectedThread.created_by_name,
+                              timestamp: formatDateTime(selectedThread.created_at),
+                            })}
                           </div>
                         </div>
                         <div className="discussion-thread-detail-actions">
@@ -571,12 +583,12 @@ export function DiscussionPanel({
                               {selectedThread.status === 'resolved' ? (
                                 <>
                                   <RotateCcw size={16} />
-                                  Reopen
+                                  {t('Reopen')}
                                 </>
                               ) : (
                                 <>
                                   <CheckCheck size={16} />
-                                  Resolve
+                                  {t('Resolve')}
                                 </>
                               )}
                             </button>
@@ -587,7 +599,7 @@ export function DiscussionPanel({
                             onClick={() => setIsThreadDetailOpen(false)}
                           >
                             <X size={14} />
-                            Close
+                            {t('Close')}
                           </button>
                         </div>
                       </div>
@@ -599,19 +611,19 @@ export function DiscussionPanel({
                       {!currentUser ? (
                         <div className="discussion-locked-copy">
                           <LockKeyhole size={14} />
-                          Sign in to reply.
+                          {t('Sign in to reply.')}
                         </div>
                       ) : (
                         <div className="discussion-reply-card">
                           {replyParent ? (
                             <div className="discussion-replying-banner">
-                              Replying to {replyParent.author_name}
+                              {t('Replying to {name}', { name: replyParent.author_name })}
                               <button
                                 type="button"
                                 className="button-secondary"
                                 onClick={() => setReplyParent(null)}
                               >
-                                Cancel
+                                {t('Cancel')}
                               </button>
                             </div>
                           ) : null}
@@ -619,7 +631,7 @@ export function DiscussionPanel({
                             className="proof-textarea discussion-composer-textarea"
                             value={replyBody}
                             onChange={(event) => setReplyBody(event.target.value)}
-                            placeholder="Write a reply..."
+                            placeholder={t('Write a reply...')}
                           />
                           <div className="discussion-composer-actions">
                             <button
@@ -629,7 +641,7 @@ export function DiscussionPanel({
                               disabled={isSubmittingReply}
                             >
                               {isSubmittingReply ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}
-                              Reply
+                              {t('Reply')}
                             </button>
                           </div>
                         </div>

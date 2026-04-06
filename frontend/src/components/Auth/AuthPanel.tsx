@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { LockKeyhole, UserRound, X } from 'lucide-react';
 
 import { loginUser, loginWithGoogle, registerUser, type AuthResponse } from '../../api';
+import { useI18n } from '../../i18n';
 
 type AuthMode = 'login' | 'register';
 
@@ -75,6 +76,7 @@ export function AuthPanel({
   onClose,
   onAuthenticated,
 }: AuthPanelProps) {
+  const { t } = useI18n();
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? '';
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<AuthMode>('login');
@@ -111,7 +113,7 @@ export function AuthPanel({
 
         const handleGoogleCredential = async (response: GoogleCredentialResponse) => {
           if (!response.credential) {
-            setGoogleError('Google did not return a usable credential.');
+            setGoogleError(t('Google did not return a usable credential.'));
             return;
           }
 
@@ -127,7 +129,7 @@ export function AuthPanel({
           } catch (googleLoginError: any) {
             if (isActive) {
               setGoogleError(
-                googleLoginError?.response?.data?.detail ?? 'Google login failed.',
+                googleLoginError?.response?.data?.detail ?? t('Google login failed.'),
               );
             }
           } finally {
@@ -151,7 +153,7 @@ export function AuthPanel({
         });
       } catch (scriptError) {
         if (isActive) {
-          setGoogleError('Failed to initialize Google login.');
+          setGoogleError(t('Failed to initialize Google login.'));
         }
       }
     };
@@ -188,7 +190,7 @@ export function AuthPanel({
 
       onAuthenticated(payload);
     } catch (error: any) {
-      setError(error?.response?.data?.detail ?? 'Authentication failed.');
+      setError(error?.response?.data?.detail ?? t('Authentication failed.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -197,7 +199,12 @@ export function AuthPanel({
   return (
     <div className="auth-backdrop" role="presentation">
       <div className="auth-card glass-panel">
-        <button className="auth-close" type="button" onClick={onClose} aria-label="Close authentication panel">
+        <button
+          className="auth-close"
+          type="button"
+          onClick={onClose}
+          aria-label={t('Close authentication panel')}
+        >
           <X size={18} />
         </button>
 
@@ -206,9 +213,11 @@ export function AuthPanel({
             <LockKeyhole size={18} color="var(--secondary-accent)" />
           </div>
           <div>
-            <h2>Member Access</h2>
+            <h2>{t('Member Access')}</h2>
             <p className="auth-helper">
-              Create an account or sign in to use the theorem oracle against the shared MySQL-backed member database.
+              {t(
+                'Create an account or sign in to use the theorem oracle against the shared MySQL-backed member database.',
+              )}
             </p>
           </div>
         </div>
@@ -219,14 +228,14 @@ export function AuthPanel({
             className={mode === 'login' ? 'is-active' : ''}
             onClick={() => setMode('login')}
           >
-            Login
+            {t('Login')}
           </button>
           <button
             type="button"
             className={mode === 'register' ? 'is-active' : ''}
             onClick={() => setMode('register')}
           >
-            Sign Up
+            {t('Sign Up')}
           </button>
         </div>
 
@@ -234,7 +243,7 @@ export function AuthPanel({
           <div className="auth-google-section">
             <div ref={googleButtonRef} className="auth-google-button" />
             <div className="auth-divider">
-              <span>or continue with email</span>
+              <span>{t('or continue with email')}</span>
             </div>
           </div>
         )}
@@ -242,7 +251,7 @@ export function AuthPanel({
         <form onSubmit={handleSubmit} className="auth-input-grid">
           {mode === 'register' && (
             <label>
-              <span className="auth-field-label">Full name</span>
+              <span className="auth-field-label">{t('Full name')}</span>
               <input
                 className="input-field"
                 value={form.full_name}
@@ -258,7 +267,7 @@ export function AuthPanel({
           )}
 
           <label>
-            <span className="auth-field-label">Email</span>
+            <span className="auth-field-label">{t('Email')}</span>
             <input
               className="input-field"
               type="email"
@@ -272,7 +281,7 @@ export function AuthPanel({
           </label>
 
           <label>
-            <span className="auth-field-label">Password</span>
+            <span className="auth-field-label">{t('Password')}</span>
             <input
               className="input-field"
               type="password"
@@ -280,7 +289,7 @@ export function AuthPanel({
               onChange={(event) =>
                 setForm((current) => ({ ...current, password: event.target.value }))
               }
-              placeholder="At least 8 characters"
+              placeholder={t('At least 8 characters')}
               minLength={8}
               maxLength={128}
               required
@@ -294,10 +303,10 @@ export function AuthPanel({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
               <UserRound size={16} />
               {isSubmitting
-                ? 'Working...'
+                ? t('Working...')
                 : mode === 'login'
-                  ? 'Login'
-                  : 'Create account'}
+                  ? t('Login')
+                  : t('Create account')}
             </span>
           </button>
         </form>

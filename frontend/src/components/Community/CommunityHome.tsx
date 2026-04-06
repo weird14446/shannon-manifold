@@ -15,6 +15,7 @@ import {
   type CommunityCategory,
   type CommunityPostSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 
 interface CommunityHomeProps {
   currentUser: AuthUser | null;
@@ -40,15 +41,13 @@ const CATEGORY_LABELS: Record<CommunityCategory, string> = {
   essay: 'Essay',
 };
 
-const formatDate = (value: string | null) =>
-  value ? new Date(value).toLocaleDateString() : 'Unpublished';
-
 export function CommunityHome({
   currentUser,
   onOpenAuth,
   onOpenPost,
   onCompose,
 }: CommunityHomeProps) {
+  const { t, formatDate } = useI18n();
   const [posts, setPosts] = useState<CommunityPostSummary[]>([]);
   const [drafts, setDrafts] = useState<CommunityPostSummary[]>([]);
   const [category, setCategory] = useState<'all' | CommunityCategory>('all');
@@ -72,7 +71,7 @@ export function CommunityHome({
         }
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load community posts.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load community posts.'));
           setPosts([]);
         }
       } finally {
@@ -156,12 +155,13 @@ export function CommunityHome({
           <div className="community-hero-copy">
             <div className="community-kicker">
               <BookOpenText size={16} />
-              Community Journal
+              {t('Community Journal')}
             </div>
-            <h2>Long-form mathematical notes, reviews, and project logs.</h2>
+            <h2>{t('Long-form mathematical notes, reviews, and project logs.')}</h2>
             <p>
-              Publish journal-style posts that cite verified theorems and projects without losing
-              the artifact-first workflow of Shannon Manifold.
+              {t(
+                'Publish journal-style posts that cite verified theorems and projects without losing the artifact-first workflow of Shannon Manifold.',
+              )}
             </p>
             <div className="community-hero-actions">
               <button
@@ -170,26 +170,26 @@ export function CommunityHome({
                 onClick={currentUser ? onCompose : onOpenAuth}
               >
                 <PenSquare size={16} />
-                Write a Post
+                {t('Write a Post')}
               </button>
               <div className="community-hero-note">
                 {currentUser
-                  ? 'Drafts stay private until you publish.'
-                  : 'Published posts are public. Sign in to write and comment.'}
+                  ? t('Drafts stay private until you publish.')
+                  : t('Published posts are public. Sign in to write and comment.')}
               </div>
             </div>
           </div>
           <div className="community-hero-stats">
             <div className="community-hero-stat">
-              <span>Published</span>
+              <span>{t('Published')}</span>
               <strong>{posts.length}</strong>
             </div>
             <div className="community-hero-stat">
-              <span>Drafts</span>
+              <span>{t('Drafts')}</span>
               <strong>{currentUser ? drafts.length : '—'}</strong>
             </div>
             <div className="community-hero-stat">
-              <span>Referenced Artifacts</span>
+              <span>{t('Referenced Artifacts')}</span>
               <strong>{referencedArtifacts.length}</strong>
             </div>
           </div>
@@ -202,9 +202,9 @@ export function CommunityHome({
                 key={item.value}
                 type="button"
                 className={`community-chip ${category === item.value ? 'is-active' : ''}`}
-                onClick={() => setCategory(item.value)}
-              >
-                {item.label}
+              onClick={() => setCategory(item.value)}
+            >
+                {item.value === 'all' ? t('All') : t(item.label)}
               </button>
             ))}
           </div>
@@ -214,7 +214,7 @@ export function CommunityHome({
               className="input-field"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search titles, summaries, and markdown..."
+              placeholder={t('Search titles, summaries, and markdown...')}
             />
           </label>
         </div>
@@ -226,7 +226,7 @@ export function CommunityHome({
             {isLoadingPosts ? (
               <div className="glass-panel theorem-empty-state">
                 <LoaderCircle size={18} className="spin" />
-                Loading community posts...
+                {t('Loading community posts...')}
               </div>
             ) : heroPost ? (
               <button
@@ -237,10 +237,10 @@ export function CommunityHome({
                 <div className="community-featured-header">
                   <div className="community-kicker">
                     <Sparkles size={16} />
-                    {heroPost.is_featured ? 'Featured Post' : 'Latest Post'}
+                    {heroPost.is_featured ? t('Featured Post') : t('Latest Post')}
                   </div>
                   <div className="community-card-meta">
-                    {CATEGORY_LABELS[heroPost.category]} · {formatDate(heroPost.published_at)}
+                    {t(CATEGORY_LABELS[heroPost.category])} · {formatDate(heroPost.published_at)}
                   </div>
                 </div>
                 <h3>{heroPost.title}</h3>
@@ -253,7 +253,9 @@ export function CommunityHome({
                   ))}
                   {heroPost.primary_artifact ? (
                     <span className="proof-badge">
-                      {heroPost.primary_artifact.artifact_type === 'theorem' ? 'Theorem' : 'Project'}
+                      {heroPost.primary_artifact.artifact_type === 'theorem'
+                        ? t('Theorem')
+                        : t('Project')}
                     </span>
                   ) : null}
                 </div>

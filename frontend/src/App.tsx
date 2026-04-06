@@ -22,6 +22,7 @@ import { AgentGraph, type GraphProjectFilterOption } from './components/AgentGra
 import { ProjectPanel } from './components/ProjectPanel/ProjectPanel';
 import { TheoremExplorer, type TheoremProjectFilterOption } from './components/TheoremList/TheoremExplorer';
 import { VerifiedCodeViewer } from './components/TheoremList/VerifiedCodeViewer';
+import { useI18n } from './i18n';
 
 type AppView = 'dashboard' | 'community' | 'projects' | 'playground' | 'code' | 'admin' | 'my';
 const CHAT_POPOVER_MIN_WIDTH = 360;
@@ -168,6 +169,7 @@ const encodeLeanShareCode = (code: string) => {
 };
 
 function App() {
+  const { language, setLanguage, t } = useI18n();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [isBootstrappingSession, setIsBootstrappingSession] = useState(true);
@@ -542,18 +544,19 @@ function App() {
 
   const renderPlaygroundFallback = (errorMessage?: string | null) => (
     <div className="screen-fallback-card glass-panel">
-      <div className="screen-fallback-title">Lean Playground is unavailable.</div>
+      <div className="screen-fallback-title">{t('Lean Playground is unavailable.')}</div>
       <p className="screen-fallback-copy">
-        The main dashboard is still available. Reload the page or return to the dashboard while
-        the Lean runtime initializes.
+        {t(
+          'The main dashboard is still available. Reload the page or return to the dashboard while the Lean runtime initializes.',
+        )}
       </p>
       {errorMessage && <div className="auth-error">{errorMessage}</div>}
       <div className="screen-fallback-actions">
         <button type="button" className="button-secondary" onClick={() => setCurrentView('dashboard')}>
-          Back to Dashboard
+          {t('Back to Dashboard')}
         </button>
         <button type="button" className="button-primary" onClick={handleRetryPlayground}>
-          Retry Playground
+          {t('Retry Playground')}
         </button>
       </div>
     </div>
@@ -584,14 +587,14 @@ function App() {
               className={`nav-pill ${currentView === 'admin' ? 'is-active' : ''}`}
               onClick={() => setCurrentView('admin')}
             >
-              Admin
+              {t('Admin')}
             </button>
           )}
           <button
             className={`nav-pill ${currentView === 'community' ? 'is-active' : ''}`}
             onClick={openCommunityHome}
           >
-            Community
+            {t('Community')}
           </button>
           <button
             className={`nav-pill ${currentView === 'projects' ? 'is-active' : ''}`}
@@ -600,20 +603,36 @@ function App() {
               setCurrentView('projects');
             }}
           >
-            Projects
+            {t('Projects')}
           </button>
           <button
             className={`nav-pill ${currentView === 'playground' ? 'is-active' : ''}`}
             onClick={() => openLeanPlayground()}
           >
-            Lean Playground
+            {t('Lean Playground')}
           </button>
           {currentView !== 'dashboard' && (
             <button className="button-secondary" onClick={() => setCurrentView('dashboard')}>
               <ArrowLeft size={16} />
-              Main Page
+              {t('Main Page')}
             </button>
           )}
+          <div className="language-switcher" role="group" aria-label="Language setting">
+            <button
+              type="button"
+              className={`language-pill ${language === 'en' ? 'is-active' : ''}`}
+              onClick={() => setLanguage('en')}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className={`language-pill ${language === 'ko' ? 'is-active' : ''}`}
+              onClick={() => setLanguage('ko')}
+            >
+              한국어
+            </button>
+          </div>
           {currentUser ? (
             <>
               <button
@@ -625,7 +644,7 @@ function App() {
                 <div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
                     {currentUser.full_name}
-                    {currentUser.is_admin ? ' · Admin' : ''}
+                    {currentUser.is_admin ? ` · ${t('Admin')}` : ''}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                     {currentUser.email}
@@ -634,12 +653,12 @@ function App() {
               </button>
               <button className="button-secondary" onClick={handleLogout}>
                 <LogOut size={16} />
-                Logout
+                {t('Logout')}
               </button>
             </>
           ) : (
             <button className="button-secondary" onClick={() => setIsAuthOpen(true)}>
-              {isBootstrappingSession ? 'Checking session...' : 'Login / Register'}
+              {isBootstrappingSession ? t('Checking session...') : t('Login / Register')}
             </button>
           )}
         </div>
@@ -650,20 +669,22 @@ function App() {
           <section className="dashboard-screen">
             <div className="glass-panel dashboard-filter-bar">
               <div className="dashboard-filter-copy">
-                <div className="dashboard-filter-title">Unified Project Filter</div>
+                <div className="dashboard-filter-title">{t('Unified Project Filter')}</div>
                 <div className="dashboard-filter-subtitle">
-                  The selected project scope applies to both Verified Database and Lean Import Manifold.
+                  {t(
+                    'The selected project scope applies to both Verified Database and Lean Import Manifold.',
+                  )}
                 </div>
               </div>
               <label className="dashboard-filter-control">
-                <span>Project Scope</span>
+                <span>{t('Project Scope')}</span>
                 <select
                   className="input-field dashboard-filter-select"
                   value={dashboardProjectFilter}
                   onChange={(event) => setDashboardProjectFilter(event.target.value)}
                 >
-                  <option value="all">All Projects</option>
-                  <option value="shared">Shared / No Project</option>
+                  <option value="all">{t('All Projects')}</option>
+                  <option value="shared">{t('Shared / No Project')}</option>
                   {dashboardProjectOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -717,7 +738,7 @@ function App() {
                     >
                       <div>
                         <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                          Lean Import Manifold
+                          {t('Lean Import Manifold')}
                         </h2>
                         <p
                           style={{
@@ -727,8 +748,9 @@ function App() {
                             textShadow: '0 1px 2px rgba(0,0,0,0.5)',
                           }}
                         >
-                          Visualized import relationships across verified user-uploaded Lean
-                          modules. Refresh when you want a new snapshot.
+                          {t(
+                            'Visualized import relationships across verified user-uploaded Lean modules. Refresh when you want a new snapshot.',
+                          )}
                         </p>
                       </div>
                       <button
@@ -738,7 +760,7 @@ function App() {
                         onClick={() => setGraphRefreshKey((current) => current + 1)}
                       >
                         <RefreshCw size={16} />
-                        Refresh
+                        {t('Refresh')}
                       </button>
                     </div>
                   </div>
@@ -820,7 +842,9 @@ function App() {
             />
           ) : (
             <section className="verified-code-screen glass-panel">
-              <div className="theorem-empty-state">Select a verified code entry from the dashboard.</div>
+              <div className="theorem-empty-state">
+                {t('Select a verified code entry from the dashboard.')}
+              </div>
             </section>
           )
         ) : (
@@ -864,18 +888,18 @@ function App() {
         />
         <div className="chat-popover-header">
           <div>
-            <div className="chat-popover-title">Theorem Oracle</div>
+            <div className="chat-popover-title">{t('Theorem Oracle')}</div>
             <div className="chat-popover-subtitle">
               {currentUser
-                ? `Signed in as ${currentUser.full_name}`
-                : 'Sign in to ask questions about Lean4, Rocq, and proofs.'}
+                ? t('Signed in as {name}', { name: currentUser.full_name })
+                : t('Sign in to ask questions about Lean4, Rocq, and proofs.')}
             </div>
           </div>
           <button
             type="button"
             className="chat-popover-close"
             onClick={() => setIsChatOpen(false)}
-            aria-label="Close chatbot"
+            aria-label={t('Close chatbot')}
           >
             <X size={18} />
           </button>
@@ -898,7 +922,7 @@ function App() {
         type="button"
         className={`chat-launcher ${isChatOpen ? 'is-open' : ''}`}
         onClick={() => setIsChatOpen((current) => !current)}
-        aria-label={isChatOpen ? 'Close chatbot' : 'Open chatbot'}
+        aria-label={isChatOpen ? t('Close chatbot') : t('Open chatbot')}
       >
         {isChatOpen ? <X size={22} /> : <Bot size={22} />}
       </button>

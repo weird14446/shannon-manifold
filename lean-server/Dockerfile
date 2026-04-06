@@ -22,7 +22,6 @@ RUN npm ci
 
 COPY . .
 RUN mkdir -p /workspace/lean-workspace
-
 EXPOSE 8080
 
-CMD ["npm", "start"]
+CMD ["sh", "/app/start.sh"]

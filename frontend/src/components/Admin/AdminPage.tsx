@@ -22,6 +22,7 @@ import {
   type AdminUserSummary,
   type AuthUser,
 } from '../../api';
+import { useI18n } from '../../i18n';
 
 interface AdminPageProps {
   currentUser: AuthUser | null;
@@ -41,6 +42,7 @@ const ADMIN_STAT_LABELS: Array<{ key: keyof AdminOverview['stats']; label: strin
 ];
 
 export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageProps) {
+  const { t } = useI18n();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [verifiedDocuments, setVerifiedDocuments] = useState<IndexedProofSummary[]>([]);
@@ -79,7 +81,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
         }
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load admin overview.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load admin overview.'));
         }
       } finally {
         if (isMounted) {
@@ -129,7 +131,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
         });
       }
     } catch (updateError: any) {
-      setError(updateError?.response?.data?.detail ?? 'Failed to update administrator role.');
+      setError(updateError?.response?.data?.detail ?? t('Failed to update administrator role.'));
     } finally {
       setSavingUserId(null);
     }
@@ -153,7 +155,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
       setOverview(nextOverview);
       setVerifiedDocuments(nextDocuments);
     } catch (deleteError: any) {
-      setError(deleteError?.response?.data?.detail ?? 'Failed to delete the user.');
+      setError(deleteError?.response?.data?.detail ?? t('Failed to delete the user.'));
     } finally {
       setDeletingUserId(null);
     }
@@ -177,7 +179,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
       setOverview(nextOverview);
       setVerifiedDocuments(nextDocuments);
     } catch (deleteError: any) {
-      setError(deleteError?.response?.data?.detail ?? 'Failed to delete the project.');
+      setError(deleteError?.response?.data?.detail ?? t('Failed to delete the project.'));
     } finally {
       setDeletingProjectKey(null);
     }
@@ -199,7 +201,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
       setOverview(nextOverview);
       setVerifiedDocuments(nextDocuments);
     } catch (deleteError: any) {
-      setError(deleteError?.response?.data?.detail ?? 'Failed to delete the verified code entry.');
+      setError(deleteError?.response?.data?.detail ?? t('Failed to delete the verified code entry.'));
     } finally {
       setDeletingDocumentId(null);
     }
@@ -210,18 +212,18 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
       <section className="account-screen glass-panel">
         <div className="account-page-header">
           <div>
-            <div className="account-page-kicker">ADMIN PAGE</div>
-            <h2>Platform administration</h2>
-            <p>Administrator tools are only available to signed-in admin accounts.</p>
+            <div className="account-page-kicker">{t('ADMIN PAGE')}</div>
+            <h2>{t('Platform administration')}</h2>
+            <p>{t('Administrator tools are only available to signed-in admin accounts.')}</p>
           </div>
         </div>
         <div className="theorem-empty-state">
           <Sparkles size={18} />
-          Login is required to access administrator controls.
+          {t('Login is required to access administrator controls.')}
         </div>
         <div className="account-page-actions">
           <button type="button" className="button-primary" onClick={onOpenAuth}>
-            Sign In
+            {t('Sign In')}
           </button>
         </div>
       </section>
@@ -233,14 +235,14 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
       <section className="account-screen glass-panel">
         <div className="account-page-header">
           <div>
-            <div className="account-page-kicker">ADMIN PAGE</div>
-            <h2>Restricted access</h2>
-            <p>This page is limited to administrator accounts configured for the platform.</p>
+            <div className="account-page-kicker">{t('ADMIN PAGE')}</div>
+            <h2>{t('Restricted access')}</h2>
+            <p>{t('This page is limited to administrator accounts configured for the platform.')}</p>
           </div>
         </div>
         <div className="theorem-empty-state">
           <ShieldCheck size={18} />
-          Your current account does not have administrator privileges.
+          {t('Your current account does not have administrator privileges.')}
         </div>
       </section>
     );
@@ -250,9 +252,9 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
     <section className="account-screen">
       <div className="glass-panel account-page-header">
         <div>
-          <div className="account-page-kicker">ADMIN PAGE</div>
-          <h2>Platform Administration</h2>
-          <p>Monitor platform usage, inspect project visibility, and manage administrator roles.</p>
+          <div className="account-page-kicker">{t('ADMIN PAGE')}</div>
+          <h2>{t('Platform Administration')}</h2>
+          <p>{t('Monitor platform usage, inspect project visibility, and manage administrator roles.')}</p>
         </div>
       </div>
 

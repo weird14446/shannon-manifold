@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BookOpenText, CheckCircle2, LoaderCircle, Lock, Sparkles } from 'lucide-react';
 
 import { getTheorems, type AuthUser, type IndexedProofSummary } from '../../api';
+import { useI18n } from '../../i18n';
 
 export interface TheoremProjectFilterOption {
   value: string;
@@ -26,6 +27,7 @@ export function TheoremExplorer({
   onProjectOptionsChange,
   hideProjectFilter = false,
 }: TheoremExplorerProps) {
+  const { t, formatDateTime } = useI18n();
   const [proofs, setProofs] = useState<IndexedProofSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -46,7 +48,7 @@ export function TheoremExplorer({
         }
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load verified code.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load verified code.'));
         }
       } finally {
         if (isMounted) {
@@ -120,28 +122,31 @@ export function TheoremExplorer({
     <div className="theorem-explorer">
       <div className="theorem-explorer-header">
         <div>
-          <h2>Verified Database</h2>
-          <p>
-            Open uploaded proofs and saved Lean playground modules in a dedicated code viewer.
-          </p>
+          <h2>{t('Verified Database')}</h2>
+          <p>{t('Open uploaded proofs and saved Lean playground modules in a dedicated code viewer.')}</p>
         </div>
         <div className="theorem-explorer-badge">
           <BookOpenText size={16} />
-          {filteredProofs.length === proofs.length ? `${proofs.length} items` : `${filteredProofs.length} / ${proofs.length} items`}
+          {filteredProofs.length === proofs.length
+            ? t('{count} items', { count: proofs.length })
+            : t('{visible} / {total} items', {
+                visible: filteredProofs.length,
+                total: proofs.length,
+              })}
         </div>
       </div>
 
       {!hideProjectFilter && (
         <div className="theorem-explorer-controls">
           <label className="theorem-filter-control">
-            <span>Project Filter</span>
+            <span>{t('Project Filter')}</span>
             <select
               className="input-field theorem-filter-select"
               value={activeProjectFilter}
               onChange={(event) => handleProjectFilterChange(event.target.value)}
             >
-              <option value="all">All Verified Code</option>
-              <option value="shared">Shared / No Project</option>
+              <option value="all">{t('All Verified Code')}</option>
+              <option value="shared">{t('Shared / No Project')}</option>
               {projectOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label} ({option.count})
@@ -157,14 +162,14 @@ export function TheoremExplorer({
       {isLoading ? (
         <div className="theorem-empty-state">
           <LoaderCircle size={18} className="spin" />
-          Loading verified code...
+          {t('Loading verified code...')}
         </div>
       ) : filteredProofs.length === 0 ? (
         <div className="theorem-empty-state">
           <Sparkles size={18} />
           {proofs.length === 0
-            ? 'Save code from the Lean Playground to populate this database.'
-            : 'No verified code matches the selected project filter.'}
+            ? t('Save code from the Lean Playground to populate this database.')
+            : t('No verified code matches the selected project filter.')}
         </div>
       ) : (
         <div className="theorem-card-list">
@@ -179,7 +184,7 @@ export function TheoremExplorer({
                 <div className="theorem-card-title-group">
                   <div className="theorem-card-title">{proof.title}</div>
                   <div className="theorem-card-meta">
-                    {proof.project_module_name ?? proof.module_name ?? proof.path ?? 'Workspace module'}
+                    {proof.project_module_name ?? proof.module_name ?? proof.path ?? t('Workspace module')}
                     {proof.project_root
                       ? ` · ${proof.project_owner_slug ? `${proof.project_owner_slug} / ` : ''}${proof.project_title ?? proof.project_slug ?? proof.project_root}`
                       : ''}
@@ -187,18 +192,20 @@ export function TheoremExplorer({
                 </div>
                 <div className="theorem-card-statuses">
                   <span className="proof-badge">{proof.proof_language}</span>
-                  <span className="proof-badge">Cited by {proof.cited_by_count}</span>
-                  {proof.project_root && <span className="proof-badge">project</span>}
+                  <span className="proof-badge">
+                    {t('Cited by {count}', { count: proof.cited_by_count })}
+                  </span>
+                  {proof.project_root && <span className="proof-badge">{t('project')}</span>}
                   <span className={proof.can_edit ? 'proof-badge' : 'proof-readonly-pill'}>
                     {proof.can_edit && currentUser ? (
                       <>
                         <CheckCircle2 size={12} />
-                        Your code
+                        {t('Your code')}
                       </>
                     ) : (
                       <>
                         <Lock size={12} />
-                        Public
+                        {t('Public')}
                       </>
                     )}
                   </span>
@@ -214,7 +221,7 @@ export function TheoremExplorer({
                     : proof.source_kind.replace(/_/g, ' ')}
                 </span>
                 <span className="theorem-card-updated">
-                  {new Date(proof.updated_at).toLocaleString()}
+                  {formatDateTime(proof.updated_at)}
                 </span>
               </div>
             </button>

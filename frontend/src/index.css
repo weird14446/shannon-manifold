@@ -4034,3 +4034,36 @@ h6 {
     margin-left: 12px;
   }
 }
+
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.language-pill {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.language-pill:hover {
+  color: var(--text-primary);
+}
+
+.language-pill.is-active {
+  background: linear-gradient(135deg, rgba(92, 81, 255, 0.92), rgba(70, 195, 255, 0.84));
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(92, 81, 255, 0.28);
+}

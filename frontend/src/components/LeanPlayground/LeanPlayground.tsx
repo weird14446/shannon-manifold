@@ -33,6 +33,7 @@ import {
   type ProjectModule,
   type ProjectSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 import { VerifiedModulePreviewCard } from './VerifiedModulePreviewCard';
 import 'lean4monaco/dist/css/custom.css';
 import 'lean4monaco/dist/css/vscode_webview.css';
@@ -517,6 +518,7 @@ export function LeanPlayground({
   onDocumentChange,
   onAttachmentChange,
 }: LeanPlaygroundProps) {
+  const { t } = useI18n();
   const sharedDocument = readDocumentFromUrl();
   const initialDocument = resolveInitialDocument(seed);
   const [currentCode, setCurrentCode] = useState(initialDocument.code);
@@ -2069,13 +2071,13 @@ export function LeanPlayground({
     Boolean(linkedPdfFilename && linkedPdfPreviewUrl && linkedPdfDownloadUrl);
   const isWorkspaceBusy = isUploadingToDatabase || Boolean(activeBuildJobId);
   const canEditProject = Boolean(activeProjectSlug && activeProjectCanEdit);
-  const saveActionLabel = 'Save to Verified DB';
+  const saveActionLabel = t('Save to Verified DB');
   const saveActionBusyLabel =
     activeBuildJobId && !isUploadingToDatabase
       ? activeBuildJobStatus === 'running'
-        ? 'Building...'
-        : 'Queued...'
-      : 'Saving...';
+        ? t('Building...')
+        : t('Queued...')
+      : t('Saving...');
 
   return (
     <section className="playground-screen">
@@ -2121,21 +2123,21 @@ export function LeanPlayground({
                 <div className="formal-editor-subtitle">
                   {isProjectMode
                     ? canEditProject
-                      ? 'Using your Lean project context'
-                      : 'Using a public Lean project context'
+                      ? t('Using your Lean project context')
+                      : t('Using a public Lean project context')
                     : documentSource === 'workspace'
-                    ? 'Loaded from your proof workspace'
+                    ? t('Loaded from your proof workspace')
                     : documentSource === 'shared'
-                      ? 'Loaded from a shared URL'
-                      : documentSource === 'uploaded'
-                        ? 'Loaded from an uploaded Lean file'
-                        : 'Lean workspace document'}
+                    ? t('Loaded from a shared URL')
+                    : documentSource === 'uploaded'
+                        ? t('Loaded from an uploaded Lean file')
+                        : t('Lean workspace document')}
                 </div>
               </div>
               <div className="formal-editor-icons">
                 <span>
                   {editorStatus === 'booting' ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}
-                  {editorStatus === 'booting' ? 'Booting Lean' : 'Lean4'}
+                  {editorStatus === 'booting' ? t('Booting Lean') : 'Lean4'}
                 </span>
                 <span>{displayedWorkspaceTarget.path}</span>
               </div>
@@ -2149,7 +2151,7 @@ export function LeanPlayground({
                   <FileText size={16} />
                   <span>{visiblePdfName}</span>
                 </div>
-                <span className="proof-badge">Local Only</span>
+                <span className="proof-badge">{t('Local Only')}</span>
               </div>
               <div className="playground-pdf-banner-actions">
                 <a
@@ -2159,7 +2161,7 @@ export function LeanPlayground({
                   rel="noreferrer"
                 >
                   <ExternalLink size={16} />
-                  Open PDF
+                  {t('Open PDF')}
                 </a>
                 <a
                   className="button-secondary"
@@ -2167,7 +2169,7 @@ export function LeanPlayground({
                   download={visiblePdfName}
                 >
                   <Download size={16} />
-                  Download
+                  {t('Download')}
                 </a>
                 <button
                   type="button"
@@ -2175,7 +2177,7 @@ export function LeanPlayground({
                   onClick={handleCancelPendingPdfUpload}
                 >
                   <X size={16} />
-                  Cancel Upload
+                  {t('Cancel Upload')}
                 </button>
               </div>
             </div>
@@ -2190,9 +2192,9 @@ export function LeanPlayground({
                 <div className="playground-pdf-banner-info">
                   <div className="playground-pdf-banner-label">
                     <FileText size={16} />
-                    <span>{attachedPdfFilename}</span>
-                  </div>
-                  <span className="proof-badge">Saved in Verified DB</span>
+                  <span>{attachedPdfFilename}</span>
+                </div>
+                  <span className="proof-badge">{t('Saved in Verified DB')}</span>
                 </div>
                 <div className="playground-pdf-banner-actions">
                   <a
@@ -2202,7 +2204,7 @@ export function LeanPlayground({
                     rel="noreferrer"
                   >
                     <ExternalLink size={16} />
-                    Open PDF
+                    {t('Open PDF')}
                   </a>
                   <a
                     className="button-secondary"
@@ -2210,7 +2212,7 @@ export function LeanPlayground({
                     download={attachedPdfFilename}
                   >
                     <Download size={16} />
-                    Download
+                    {t('Download')}
                   </a>
               </div>
             </div>
@@ -2225,9 +2227,9 @@ export function LeanPlayground({
                 <div className="playground-pdf-banner-info">
                   <div className="playground-pdf-banner-label">
                     <FileText size={16} />
-                    <span>{linkedPdfFilename}</span>
-                  </div>
-                  <span className="proof-badge">Linked from Source</span>
+                  <span>{linkedPdfFilename}</span>
+                </div>
+                  <span className="proof-badge">{t('Linked from Source')}</span>
                 </div>
                 <div className="playground-pdf-banner-actions">
                   <a
@@ -2237,7 +2239,7 @@ export function LeanPlayground({
                     rel="noreferrer"
                   >
                     <ExternalLink size={16} />
-                    Open PDF
+                    {t('Open PDF')}
                   </a>
                   <a
                     className="button-secondary"
@@ -2245,7 +2247,7 @@ export function LeanPlayground({
                     download={linkedPdfFilename}
                   >
                     <Download size={16} />
-                    Download
+                    {t('Download')}
                   </a>
                 </div>
               </div>
@@ -2259,18 +2261,18 @@ export function LeanPlayground({
                 <div className="playground-module-panel-header">
                   <div className="proof-section-heading">
                     <FileText size={16} color="var(--secondary-accent)" />
-                    <span>Project Modules</span>
+                    <span>{t('Project Modules')}</span>
                   </div>
                   <div className="proof-helper-text">
-                    Browse the verified Lean modules inside the selected project.
+                    {t('Browse the verified Lean modules inside the selected project.')}
                   </div>
                   <label className="playground-module-search-field">
-                    <span>Search modules</span>
+                    <span>{t('Search modules')}</span>
                     <input
                       className="input-field"
                       value={projectModuleQuery}
                       onChange={(event) => setProjectModuleQuery(event.target.value)}
-                      placeholder="Filter by title, path, or module"
+                      placeholder={t('Filter by title, path, or module')}
                     />
                   </label>
                 </div>
@@ -2278,15 +2280,15 @@ export function LeanPlayground({
                   {isLoadingProjectModules ? (
                     <div className="theorem-empty-state">
                       <LoaderCircle size={18} className="spin" />
-                      Loading modules...
+                      {t('Loading modules...')}
                     </div>
                   ) : projectModules.length === 0 ? (
                     <div className="theorem-empty-state">
-                      No verified Lean modules were found in this project yet.
+                      {t('No verified Lean modules were found in this project yet.')}
                     </div>
                   ) : filteredProjectModules.length === 0 ? (
                     <div className="theorem-empty-state">
-                      No verified modules match the current search.
+                      {t('No verified modules match the current search.')}
                     </div>
                   ) : (
                     filteredProjectModules.map((module) => {
@@ -2303,7 +2305,7 @@ export function LeanPlayground({
                         >
                           <div className="playground-module-item-title-row">
                             <span className="playground-module-item-title">{module.title}</span>
-                            {module.is_entry && <span className="proof-badge">entry</span>}
+                            {module.is_entry && <span className="proof-badge">{t('entry')}</span>}
                             {isOpening && <LoaderCircle size={14} className="spin" />}
                           </div>
                           <div className="playground-module-item-meta">{module.path}</div>
@@ -2323,7 +2325,7 @@ export function LeanPlayground({
                 <div className="playground-infoview-head-top">
                   <div className="proof-section-heading">
                     <Sparkles size={16} color="var(--secondary-accent)" />
-                    <span>Infoview</span>
+                    <span>{t('Infoview')}</span>
                   </div>
                   <button
                     type="button"
@@ -2331,13 +2333,14 @@ export function LeanPlayground({
                     onClick={() => setIsAuxiliaryUiVisible((current) => !current)}
                   >
                     {isAuxiliaryUiVisible ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-                    {isAuxiliaryUiVisible ? 'Hide UI' : 'Show UI'}
+                    {isAuxiliaryUiVisible ? t('Hide UI') : t('Show UI')}
                   </button>
                 </div>
                 <div>
                   <p>
-                    Goals, messages, tactics, and diagnostics from the Lean server. Place the cursor
-                    inside a theorem or `by` block to inspect the current proof state.
+                    {t(
+                      'Goals, messages, tactics, and diagnostics from the Lean server. Place the cursor inside a theorem or `by` block to inspect the current proof state.',
+                    )}
                   </p>
                 </div>
               </div>
@@ -2349,7 +2352,7 @@ export function LeanPlayground({
                 <div className="playground-sidebar-scroll">
                 <div className="playground-sidebar-section">
                   <label className="playground-toolbar-group playground-title-field">
-                    <span>Project</span>
+                    <span>{t('Project')}</span>
                     <select
                       className="input-field"
                       value={projectSelectionValue}
@@ -2359,9 +2362,9 @@ export function LeanPlayground({
                       <option value="">
                         {currentUser
                           ? isLoadingProjects
-                            ? 'Loading projects...'
-                            : 'No project'
-                          : 'Sign in to select a project'}
+                            ? t('Loading projects...')
+                            : t('No project')
+                          : t('Sign in to select a project')}
                       </option>
                       {selectableProjects.map((project) => (
                         <option
@@ -2374,13 +2377,13 @@ export function LeanPlayground({
                     </select>
                   </label>
                   <div className="proof-infoview-detail">
-                    Projects here are used as Lean import context and verified DB grouping only.
+                    {t('Projects here are used as Lean import context and verified DB grouping only.')}
                   </div>
                 </div>
 
                 <div className="playground-sidebar-section">
                   <label className="playground-toolbar-group playground-title-field">
-                    <span>{isProjectMode ? 'File' : 'Document'}</span>
+                    <span>{isProjectMode ? t('File') : t('Document')}</span>
                     <input
                       className="input-field playground-file-name-input"
                       value={currentTitle}
@@ -2390,7 +2393,7 @@ export function LeanPlayground({
                           commitProjectFileName();
                         }
                       }}
-                      placeholder={isProjectMode ? 'Lean file name' : 'Lean document title'}
+                      placeholder={isProjectMode ? t('Lean file name') : t('Lean document title')}
                       title={currentTitle}
                     />
                   </label>
@@ -2398,11 +2401,15 @@ export function LeanPlayground({
 
                 <div className="playground-sidebar-section">
                   <div className="proof-infoview-card playground-save-card">
-                    <div className="proof-infoview-label">Save</div>
+                    <div className="proof-infoview-label">{t('Save')}</div>
                     <div className="proof-infoview-detail">
                       {isProjectMode
-                        ? 'Projects group Lean files. Saving here publishes the current Lean code to the verified database under the active project.'
-                        : 'Save the current Lean code to the verified database. If a PDF is attached, the verified detail view will show both side by side.'}
+                        ? t(
+                            'Projects group Lean files. Saving here publishes the current Lean code to the verified database under the active project.',
+                          )
+                        : t(
+                            'Save the current Lean code to the verified database. If a PDF is attached, the verified detail view will show both side by side.',
+                          )}
                     </div>
                     <div className="playground-toolbar-actions" style={{ marginTop: '12px' }}>
                       <button
@@ -2421,8 +2428,9 @@ export function LeanPlayground({
                     </div>
                     {pendingPdfFile && (
                       <div className="proof-infoview-detail" style={{ marginTop: '4px' }}>
-                        The attached PDF will be stored together with this Lean code in the verified
-                        database.
+                        {t(
+                          'The attached PDF will be stored together with this Lean code in the verified database.',
+                        )}
                       </div>
                     )}
                   </div>
@@ -2431,28 +2439,28 @@ export function LeanPlayground({
                 <div className="playground-toolbar-actions playground-sidebar-actions">
                   <button type="button" className="button-secondary" onClick={handleSelectCodeUpload}>
                     <FileUp size={16} />
-                    Upload Code
+                    {t('Upload Code')}
                   </button>
                   <button type="button" className="button-secondary" onClick={handleSelectPdfUpload}>
                     <FileUp size={16} />
-                    {pendingPdfFile ? 'Replace PDF' : 'Upload PDF'}
+                    {pendingPdfFile ? t('Replace PDF') : t('Upload PDF')}
                   </button>
                   <button type="button" className="button-secondary" onClick={handleRestartLean}>
                     <ExternalLink size={16} />
-                    Restart Lean
+                    {t('Restart Lean')}
                   </button>
                   <button type="button" className="button-secondary" onClick={handleReset}>
                     <RotateCcw size={16} />
-                    Reset
+                    {t('Reset')}
                   </button>
                   <button type="button" className="button-secondary" onClick={handleCopyShareLink}>
                     {shareState === 'copied' ? <Check size={16} /> : <Copy size={16} />}
-                    {shareState === 'copied' ? 'Link Copied' : 'Share URL'}
+                    {shareState === 'copied' ? t('Link Copied') : t('Share URL')}
                   </button>
                   {isProjectMode && activeProjectGithubUrl && (
                     <button type="button" className="button-secondary" onClick={handleOpenRepository}>
                       <ExternalLink size={16} />
-                      Open Link
+                      {t('Open Link')}
                     </button>
                   )}
                 </div>
@@ -2460,45 +2468,55 @@ export function LeanPlayground({
                 <div className="playground-note-list">
                   <div className="playground-sidebar-meta">
                     <span className="proof-badge">{editorStatus}</span>
-                    <span className="proof-badge">{lineCount} lines</span>
+                    <span className="proof-badge">{t('{count} lines', { count: lineCount })}</span>
                     <span className="proof-badge">{`L${cursorSnapshot.line}:C${cursorSnapshot.column}`}</span>
                     <span className="proof-badge">{displayedWorkspaceTarget.module}</span>
                     <span className="proof-badge">{webSocketUrl}</span>
                   </div>
                   <div className="proof-infoview-card">
-                    <div className="proof-infoview-label">Workspace File</div>
+                    <div className="proof-infoview-label">{t('Workspace File')}</div>
                     <div className="proof-infoview-detail">
                       {displayedWorkspaceTarget.path}
                     </div>
                   </div>
                   {isProjectMode && (
                     <div className="proof-infoview-card">
-                      <div className="proof-infoview-label">Project</div>
+                      <div className="proof-infoview-label">{t('Project')}</div>
                       <div className="proof-infoview-detail">
                         {activeProjectTitle || activeProjectSlug}
                       </div>
                       <div className="proof-infoview-detail">
-                        Owner `{activeProjectOwnerSlug}` · Visibility `{activeProjectVisibility}`
+                        {t('Owner `{owner}` · Visibility `{visibility}`', {
+                          owner: activeProjectOwnerSlug ?? '',
+                          visibility: activeProjectVisibility,
+                        })}
                       </div>
                       <div className="proof-infoview-detail">{activeProjectRoot}</div>
                       <div className="proof-infoview-detail">
-                        Package `{activeProjectPackageName}` · Entry `{activeProjectEntryModuleName}`
+                        {t('Package `{pkg}` · Entry `{entry}`', {
+                          pkg: activeProjectPackageName ?? '',
+                          entry: activeProjectEntryModuleName ?? '',
+                        })}
                       </div>
                       {!canEditProject && (
                         <div className="proof-infoview-detail" style={{ marginTop: '8px', color: '#ffcf8b' }}>
-                          This public project is open read-only. Save to `Verified DB` if you want to keep your own copy of the current code.
+                          {t(
+                            'This public project is open read-only. Save to `Verified DB` if you want to keep your own copy of the current code.',
+                          )}
                         </div>
                       )}
                     </div>
                   )}
                   {isProjectMode && canEditProject && (
                     <div className="proof-infoview-card">
-                      <div className="proof-infoview-label">GitHub Link</div>
+                      <div className="proof-infoview-label">{t('GitHub Link')}</div>
                       <div className="proof-infoview-detail">
-                        This project keeps its own repository link. Saving the link does not push code.
+                        {t(
+                          'This project keeps its own repository link. Saving the link does not push code.',
+                        )}
                       </div>
                       <label className="playground-toolbar-group playground-title-field" style={{ marginTop: '12px' }}>
-                        <span>Repository URL</span>
+                        <span>{t('Repository URL')}</span>
                         <input
                           className="input-field"
                           value={projectGithubUrlDraft}
@@ -2515,12 +2533,12 @@ export function LeanPlayground({
                           disabled={isSavingProjectLink}
                         >
                           {isSavingProjectLink ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}
-                          {isSavingProjectLink ? 'Saving Link...' : 'Save Link'}
+                          {isSavingProjectLink ? t('Saving Link...') : t('Save Link')}
                         </button>
                         {activeProjectGithubUrl && (
                           <button type="button" className="button-secondary" onClick={handleOpenRepository}>
                             <ExternalLink size={16} />
-                            Open Link
+                            {t('Open Link')}
                           </button>
                         )}
                       </div>
@@ -2528,7 +2546,7 @@ export function LeanPlayground({
                   )}
                   {pendingPdfFile && attachedPdfPreviewUrl && attachedPdfDownloadUrl && (
                     <div className="proof-infoview-card playground-pdf-card">
-                      <div className="proof-infoview-label">PDF Preview</div>
+                      <div className="proof-infoview-label">{t('PDF Preview')}</div>
                       <div className="playground-pdf-actions">
                         <a
                           className="button-secondary"
@@ -2537,7 +2555,7 @@ export function LeanPlayground({
                           rel="noreferrer"
                         >
                           <ExternalLink size={16} />
-                          Open PDF
+                          {t('Open PDF')}
                         </a>
                         <a
                           className="button-secondary"
@@ -2545,7 +2563,7 @@ export function LeanPlayground({
                           download={visiblePdfName ?? pendingPdfFile.name}
                         >
                           <Download size={16} />
-                          Download PDF
+                          {t('Download PDF')}
                         </a>
                       </div>
                       <iframe
@@ -2554,9 +2572,9 @@ export function LeanPlayground({
                         title={`${currentTitle} PDF preview`}
                       />
                       <div className="proof-infoview-detail">
-                        This PDF is attached only in the playground right now. Use Save to Verified DB
-                        to store it together with the current Lean code, then inspect both in split view
-                        from the verified database.
+                        {t(
+                          'This PDF is attached only in the playground right now. Use Save to Verified DB to store it together with the current Lean code, then inspect both in split view from the verified database.',
+                        )}
                       </div>
                     </div>
                   )}
@@ -2565,7 +2583,7 @@ export function LeanPlayground({
                     savedPdfPreviewUrl &&
                     savedPdfDownloadUrl && (
                       <div className="proof-infoview-card playground-pdf-card">
-                        <div className="proof-infoview-label">Saved PDF</div>
+                        <div className="proof-infoview-label">{t('Saved PDF')}</div>
                         <div className="playground-pdf-actions">
                           <a
                             className="button-secondary"
@@ -2574,7 +2592,7 @@ export function LeanPlayground({
                             rel="noreferrer"
                           >
                             <ExternalLink size={16} />
-                            Open PDF
+                            {t('Open PDF')}
                           </a>
                           <a
                             className="button-secondary"
@@ -2582,7 +2600,7 @@ export function LeanPlayground({
                             download={attachedPdfFilename}
                           >
                             <Download size={16} />
-                            Download PDF
+                            {t('Download PDF')}
                           </a>
                         </div>
                         <iframe
@@ -2591,8 +2609,9 @@ export function LeanPlayground({
                           title={`${currentTitle} PDF preview`}
                         />
                         <div className="proof-infoview-detail">
-                          This PDF is already linked to the verified database entry for the current code.
-                          Opening that entry will show the Lean code and PDF side by side.
+                          {t(
+                            'This PDF is already linked to the verified database entry for the current code. Opening that entry will show the Lean code and PDF side by side.',
+                          )}
                         </div>
                       </div>
                     )}
@@ -2601,7 +2620,7 @@ export function LeanPlayground({
                     linkedPdfPreviewUrl &&
                     linkedPdfDownloadUrl && (
                       <div className="proof-infoview-card playground-pdf-card">
-                        <div className="proof-infoview-label">Source PDF</div>
+                        <div className="proof-infoview-label">{t('Source PDF')}</div>
                         <div className="playground-pdf-actions">
                           <a
                             className="button-secondary"
@@ -2610,7 +2629,7 @@ export function LeanPlayground({
                             rel="noreferrer"
                           >
                             <ExternalLink size={16} />
-                            Open PDF
+                            {t('Open PDF')}
                           </a>
                           <a
                             className="button-secondary"
@@ -2618,7 +2637,7 @@ export function LeanPlayground({
                             download={linkedPdfFilename}
                           >
                             <Download size={16} />
-                            Download PDF
+                            {t('Download PDF')}
                           </a>
                         </div>
                         <iframe
@@ -2627,22 +2646,31 @@ export function LeanPlayground({
                           title={`${currentTitle} source PDF preview`}
                         />
                         <div className="proof-infoview-detail">
-                          This PDF is linked from the current source artifact and stays read-only in the playground.
+                          {t(
+                            'This PDF is linked from the current source artifact and stays read-only in the playground.',
+                          )}
                         </div>
                       </div>
                     )}
                   <div className="proof-infoview-card">
-                    <div className="proof-infoview-label">Copilot Focus</div>
+                    <div className="proof-infoview-label">{t('Copilot Focus')}</div>
                     <div className="proof-infoview-detail">
-                      {activeGoal || 'Move the cursor inside a theorem or `by` block to send the active goal to the Oracle.'}
+                      {activeGoal ||
+                        t(
+                          'Move the cursor inside a theorem or `by` block to send the active goal to the Oracle.',
+                        )}
                     </div>
                   </div>
                   <div className="proof-infoview-card">
-                    <div className="proof-infoview-label">Imports</div>
+                    <div className="proof-infoview-label">{t('Imports')}</div>
                     <div className="proof-infoview-detail">
                       {isProjectMode
-                        ? 'Project files keep the `import <Package>.Main` convention and build inside the selected project root.'
-                        : 'Save from the playground, then import any module below from the shared Lean workspace.'}
+                        ? t(
+                            'Project files keep the `import <Package>.Main` convention and build inside the selected project root.',
+                          )
+                        : t(
+                            'Save from the playground, then import any module below from the shared Lean workspace.',
+                          )}
                     </div>
                     {isProjectMode ? (
                       <div className="playground-import-list">
@@ -2662,17 +2690,19 @@ export function LeanPlayground({
                     )}
                   </div>
                   <div className="proof-infoview-card">
-                    <div className="proof-infoview-label">Share</div>
+                    <div className="proof-infoview-label">{t('Share')}</div>
                     <div className="proof-infoview-detail">
                       {isProjectMode
-                        ? 'Copy a URL that reopens the selected project root and file.'
-                        : 'Copy a URL snapshot of the current code, similar to the official Lean live editor.'}
+                        ? t('Copy a URL that reopens the selected project root and file.')
+                        : t(
+                            'Copy a URL snapshot of the current code, similar to the official Lean live editor.',
+                          )}
                     </div>
                   </div>
                   <div className="proof-infoview-card">
-                    <div className="proof-infoview-label">Container</div>
+                    <div className="proof-infoview-label">{t('Container')}</div>
                     <div className="proof-infoview-detail">
-                      The Lean server runs in the dedicated Docker service on port 8080.
+                      {t('The Lean server runs in the dedicated Docker service on port 8080.')}
                     </div>
                   </div>
                 </div>

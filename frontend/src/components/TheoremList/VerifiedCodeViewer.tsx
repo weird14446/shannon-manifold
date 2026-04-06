@@ -26,6 +26,7 @@ import {
   type TheoremPdfMappingItem,
   updateTheorem,
 } from '../../api';
+import { useI18n } from '../../i18n';
 import { DiscussionPanel, type DiscussionAnchorSelection } from '../Discussion/DiscussionPanel';
 import {
   buildLeanDeclarationKey,
@@ -68,6 +69,7 @@ export function VerifiedCodeViewer({
   onOpenAuth,
   onOpenPlayground,
 }: VerifiedCodeViewerProps) {
+  const { t, formatDateTime } = useI18n();
   const [detail, setDetail] = useState<IndexedProofDetail | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
@@ -103,7 +105,7 @@ export function VerifiedCodeViewer({
         }
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load the selected code entry.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load the selected code entry.'));
         }
       } finally {
         if (isMounted) {
@@ -130,8 +132,8 @@ export function VerifiedCodeViewer({
     if (!detail) {
       return '';
     }
-    return new Date(detail.updated_at).toLocaleString();
-  }, [detail]);
+    return formatDateTime(detail.updated_at);
+  }, [detail, formatDateTime]);
 
   const handleOpenPlayground = () => {
     if (!detail) {
@@ -167,7 +169,7 @@ export function VerifiedCodeViewer({
       setDraftContent(updated.content);
       setIsEditing(false);
     } catch (saveError: any) {
-      setError(saveError?.response?.data?.detail ?? 'Failed to save the code entry.');
+      setError(saveError?.response?.data?.detail ?? t('Failed to save the code entry.'));
     } finally {
       setIsSaving(false);
     }
@@ -183,7 +185,9 @@ export function VerifiedCodeViewer({
       return;
     }
 
-    const confirmed = window.confirm(`Delete "${detail.title}" from the verified database?`);
+    const confirmed = window.confirm(
+      t('Delete "{title}" from the verified database?', { title: detail.title }),
+    );
     if (!confirmed) {
       return;
     }
@@ -195,7 +199,7 @@ export function VerifiedCodeViewer({
       await deleteTheorem(detail.id);
       onBack();
     } catch (deleteError: any) {
-      setError(deleteError?.response?.data?.detail ?? 'Failed to delete the code entry.');
+      setError(deleteError?.response?.data?.detail ?? t('Failed to delete the code entry.'));
     } finally {
       setIsDeleting(false);
     }
@@ -229,7 +233,8 @@ export function VerifiedCodeViewer({
         if (isMounted) {
           setMappingItems([]);
           setMappingError(
-            loadError?.response?.data?.detail ?? 'Failed to load the PDF mapping for this code entry.',
+            loadError?.response?.data?.detail ??
+              t('Failed to load the PDF mapping for this code entry.'),
           );
         }
       } finally {
@@ -313,7 +318,7 @@ export function VerifiedCodeViewer({
       <section className="verified-code-screen glass-panel">
         <div className="theorem-empty-state">
           <LoaderCircle size={18} className="spin" />
-          Loading verified code...
+          {t('Loading verified code...')}
         </div>
       </section>
     );
@@ -325,10 +330,12 @@ export function VerifiedCodeViewer({
         <div className="verified-code-header">
           <button type="button" className="button-secondary" onClick={onBack}>
             <ArrowLeft size={16} />
-            Back to Database
+            {t('Back to Database')}
           </button>
         </div>
-        <div className="theorem-empty-state">{error || 'The requested code entry was not found.'}</div>
+        <div className="theorem-empty-state">
+          {error || t('The requested code entry was not found.')}
+        </div>
       </section>
     );
   }
@@ -339,7 +346,7 @@ export function VerifiedCodeViewer({
         <div className="verified-code-heading">
           <div className="verified-code-kicker">
             <FileCode2 size={16} />
-            Verified Code Viewer
+            {t('Verified Code Viewer')}
           </div>
           <h2>{detail.title}</h2>
           <p>
@@ -350,11 +357,11 @@ export function VerifiedCodeViewer({
         <div className="verified-code-actions">
           <button type="button" className="button-secondary" onClick={onBack}>
             <ArrowLeft size={16} />
-            Back to Database
+            {t('Back to Database')}
           </button>
           <button type="button" className="button-secondary" onClick={handleOpenPlayground}>
             <ExternalLink size={16} />
-            Remix to Playground
+            {t('Remix to Playground')}
           </button>
           <button
             type="button"
@@ -362,7 +369,7 @@ export function VerifiedCodeViewer({
             onClick={() => setIsDiscussionOpen((current) => !current)}
           >
             {isDiscussionOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-            {isDiscussionOpen ? 'Hide Discussion' : 'Show Discussion'}
+            {isDiscussionOpen ? t('Hide Discussion') : t('Show Discussion')}
           </button>
           {detail.can_edit && (
             <>
@@ -374,7 +381,7 @@ export function VerifiedCodeViewer({
                   disabled={isSaving}
                 >
                   <Save size={16} />
-                  {isSaving ? 'Saving...' : 'Save Changes'}
+                  {isSaving ? t('Saving...') : t('Save Changes')}
                 </button>
               ) : (
                 <button
@@ -383,7 +390,7 @@ export function VerifiedCodeViewer({
                   onClick={() => setIsEditing(true)}
                 >
                   <Pencil size={16} />
-                  Edit
+                  {t('Edit')}
                 </button>
               )}
             </>
@@ -397,7 +404,7 @@ export function VerifiedCodeViewer({
                 disabled={isDeleting}
               >
                 <Trash2 size={16} />
-                {isDeleting ? 'Deleting...' : 'Delete'}
+                {isDeleting ? t('Deleting...') : t('Delete')}
               </button>
             </>
           )}
@@ -406,17 +413,19 @@ export function VerifiedCodeViewer({
 
       <div className="verified-code-meta">
         <span className="proof-badge">{detail.proof_language}</span>
-        <span className="proof-badge">Cited by {detail.cited_by_count}</span>
+        <span className="proof-badge">
+          {t('Cited by {count}', { count: detail.cited_by_count })}
+        </span>
         <span className="proof-badge">{detail.status}</span>
         <span className="proof-badge">{detail.source_kind.replace(/_/g, ' ')}</span>
         <span className={detail.can_edit ? 'proof-badge' : 'proof-readonly-pill'}>
           {detail.can_edit ? (
             <>
               <Check size={12} />
-              Editable by you
+              {t('Editable by you')}
             </>
           ) : (
-            'Read-only public code'
+            t('Read-only public code')
           )}
         </span>
       </div>
@@ -425,8 +434,9 @@ export function VerifiedCodeViewer({
 
       {!detail.can_edit && (
         <div className="proof-readonly-note">
-          This page is public, so anyone can inspect the code. Editing stays restricted to the
-          owner, while deletion is available to the owner or an administrator.
+          {t(
+            'This page is public, so anyone can inspect the code. Editing stays restricted to the owner, while deletion is available to the owner or an administrator.',
+          )}
         </div>
       )}
 
@@ -436,22 +446,22 @@ export function VerifiedCodeViewer({
             <div className="verified-code-panel">
               <div className="verified-code-kicker">
                 <FileCode2 size={16} />
-                Lean Source
+                {t('Lean Source')}
               </div>
               <div className="verified-code-scroll-shell">
                 {isEditing ? (
                   <div className="verified-code-editor">
                     <label className="verified-code-field">
-                      <span>Title</span>
+                      <span>{t('Title')}</span>
                       <input
                         className="input-field"
                         value={draftTitle}
                         onChange={(event) => setDraftTitle(event.target.value)}
-                        placeholder="Lean module title"
+                        placeholder={t('Lean module title')}
                       />
                     </label>
                     <label className="verified-code-field verified-code-field-grow">
-                      <span>Lean Source</span>
+                      <span>{t('Lean Source')}</span>
                       <textarea
                         className="proof-textarea verified-code-textarea"
                         value={draftContent}
@@ -484,10 +494,10 @@ export function VerifiedCodeViewer({
                   <div>
                     <div className="verified-code-kicker">
                       <FileText size={16} />
-                      Source PDF
+                      {t('Source PDF')}
                     </div>
                     <p className="verified-pdf-copy">
-                      {detail.pdf_filename ?? 'Original uploaded PDF'}
+                      {detail.pdf_filename ?? t('Original uploaded PDF')}
                     </p>
                   </div>
                   <div className="verified-code-actions">
@@ -498,20 +508,20 @@ export function VerifiedCodeViewer({
                       rel="noreferrer"
                     >
                       <ExternalLink size={16} />
-                      Open PDF
+                      {t('Open PDF')}
                     </a>
                     <a className="button-secondary" href={pdfDownloadUrl}>
                       <Download size={16} />
-                      Download PDF
+                      {t('Download PDF')}
                     </a>
                   </div>
                 </div>
                 <div className="verified-pdf-mapping-card">
-                  <div className="verified-pdf-mapping-kicker">Lean ↔ PDF Mapping</div>
+                  <div className="verified-pdf-mapping-kicker">{t('Lean ↔ PDF Mapping')}</div>
                   {isLoadingMapping ? (
                     <div className="verified-pdf-mapping-copy">
                       <LoaderCircle size={15} className="spin" />
-                      Generating PDF excerpts for the Lean declarations...
+                      {t('Generating PDF excerpts for the Lean declarations...')}
                     </div>
                   ) : mappingError ? (
                     <div className="verified-pdf-mapping-copy">{mappingError}</div>
@@ -540,7 +550,7 @@ export function VerifiedCodeViewer({
                           }}
                         >
                           <MessageSquare size={16} />
-                          Discuss This Mapping
+                          {t('Discuss This Mapping')}
                         </button>
                       </div>
                     </>
@@ -560,11 +570,13 @@ export function VerifiedCodeViewer({
                     </>
                   ) : mappingItems.length > 0 ? (
                     <div className="verified-pdf-mapping-copy">
-                      Hover a mapped Lean declaration to preview the corresponding PDF excerpt here.
+                      {t(
+                        'Hover a mapped Lean declaration to preview the corresponding PDF excerpt here.',
+                      )}
                     </div>
                   ) : (
                     <div className="verified-pdf-mapping-copy">
-                      No PDF mapping could be generated for the current Lean declarations yet.
+                      {t('No PDF mapping could be generated for the current Lean declarations yet.')}
                     </div>
                   )}
                 </div>
@@ -586,14 +598,14 @@ export function VerifiedCodeViewer({
                 className={`discussion-tab ${discussionTab === 'general' ? 'is-active' : ''}`}
                 onClick={() => setDiscussionTab('general')}
               >
-                General
+                {t('General')}
               </button>
               <button
                 type="button"
                 className={`discussion-tab ${discussionTab === 'code' ? 'is-active' : ''}`}
                 onClick={() => setDiscussionTab('code')}
               >
-                Code
+                {t('Code')}
               </button>
               {hasPdfPreview ? (
                 <button
@@ -601,26 +613,26 @@ export function VerifiedCodeViewer({
                   className={`discussion-tab ${discussionTab === 'pdf' ? 'is-active' : ''}`}
                   onClick={() => setDiscussionTab('pdf')}
                 >
-                  PDF
+                  {t('PDF')}
                 </button>
               ) : null}
             </div>
 
             {discussionTab === 'general' ? (
               <DiscussionPanel
-                title="Theorem Discussion"
+                title={t('Theorem Discussion')}
                 currentUser={currentUser}
                 onOpenAuth={onOpenAuth}
                 scopeType="theorem"
                 scopeKey={theoremScopeKey}
                 anchorType="general"
-                emptyMessage="No theorem-wide discussion has started yet."
+                emptyMessage={t('No theorem-wide discussion has started yet.')}
               />
             ) : null}
 
             {discussionTab === 'code' ? (
               <DiscussionPanel
-                title="Code Discussions"
+                title={t('Code Discussions')}
                 currentUser={currentUser}
                 onOpenAuth={onOpenAuth}
                 scopeType="theorem"
@@ -629,17 +641,19 @@ export function VerifiedCodeViewer({
                 currentAnchor={codeAnchor}
                 emptyMessage={
                   codeAnchor
-                    ? 'No discussion threads exist for the selected declaration yet.'
-                    : 'No declaration discussions exist for this theorem yet.'
+                    ? t('No discussion threads exist for the selected declaration yet.')
+                    : t('No declaration discussions exist for this theorem yet.')
                 }
-                selectionRequiredMessage="Click a theorem / lemma / def declaration in the Lean source to start a thread for it."
+                selectionRequiredMessage={t(
+                  'Click a theorem / lemma / def declaration in the Lean source to start a thread for it.',
+                )}
                 onSummariesChange={setCodeDiscussionThreads}
               />
             ) : null}
 
             {discussionTab === 'pdf' && hasPdfPreview ? (
               <DiscussionPanel
-                title="PDF Discussions"
+                title={t('PDF Discussions')}
                 currentUser={currentUser}
                 onOpenAuth={onOpenAuth}
                 scopeType="theorem"
@@ -648,10 +662,12 @@ export function VerifiedCodeViewer({
                 currentAnchor={pdfAnchor}
                 emptyMessage={
                   pdfAnchor
-                    ? 'No discussion threads exist for the selected PDF anchor yet.'
-                    : 'No PDF discussions exist for this theorem yet.'
+                    ? t('No discussion threads exist for the selected PDF anchor yet.')
+                    : t('No PDF discussions exist for this theorem yet.')
                 }
-                selectionRequiredMessage="Use a mapped PDF excerpt from the PDF panel to anchor a discussion thread."
+                selectionRequiredMessage={t(
+                  'Use a mapped PDF excerpt from the PDF panel to anchor a discussion thread.',
+                )}
               />
             ) : null}
           </aside>

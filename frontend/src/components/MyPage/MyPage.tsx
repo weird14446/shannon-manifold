@@ -22,6 +22,7 @@ import {
   type ProjectSummary,
   type ProofWorkspaceSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 
 interface MyPageProps {
   currentUser: AuthUser | null;
@@ -86,6 +87,7 @@ export function MyPage({
   onOpenProject,
   onUserUpdated,
 }: MyPageProps) {
+  const { t, formatDateTime } = useI18n();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [proofs, setProofs] = useState<IndexedProofSummary[]>([]);
   const [workspaces, setWorkspaces] = useState<ProofWorkspaceSummary[]>([]);
@@ -129,7 +131,7 @@ export function MyPage({
         setWorkspaces(workspaceItems);
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load your account page.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load your account page.'));
         }
       } finally {
         if (isMounted) {
@@ -170,7 +172,7 @@ export function MyPage({
       const updated = await updateCurrentUser({ full_name: profileName });
       onUserUpdated(updated);
     } catch (saveError: any) {
-      setError(saveError?.response?.data?.detail ?? 'Failed to update your profile.');
+      setError(saveError?.response?.data?.detail ?? t('Failed to update your profile.'));
     } finally {
       setIsSavingProfile(false);
     }
@@ -181,18 +183,22 @@ export function MyPage({
       <section className="account-screen glass-panel">
         <div className="account-page-header">
           <div>
-            <div className="account-page-kicker">MY PAGE</div>
-            <h2>Member profile</h2>
-            <p>Sign in to view your projects, verified code, and proof workspaces in one place.</p>
+            <div className="account-page-kicker">{t('MY PAGE')}</div>
+            <h2>{t('Member profile')}</h2>
+            <p>
+              {t(
+                'Sign in to view your projects, verified code, and proof workspaces in one place.',
+              )}
+            </p>
           </div>
         </div>
         <div className="theorem-empty-state">
           <Sparkles size={18} />
-          Login is required to open your account page.
+          {t('Login is required to open your account page.')}
         </div>
         <div className="account-page-actions">
           <button type="button" className="button-primary" onClick={onOpenAuth}>
-            Sign In
+            {t('Sign In')}
           </button>
         </div>
       </section>
@@ -203,9 +209,9 @@ export function MyPage({
     <section className="account-screen">
       <div className="glass-panel account-page-header">
         <div>
-          <div className="account-page-kicker">MY PAGE</div>
+          <div className="account-page-kicker">{t('MY PAGE')}</div>
           <h2>{currentUser.full_name}</h2>
-          <p>Review your account profile, personal project space, and verified Lean assets.</p>
+          <p>{t('Review your account profile, personal project space, and verified Lean assets.')}</p>
         </div>
       </div>
 
@@ -218,18 +224,18 @@ export function MyPage({
               <UserRound size={18} />
             </div>
             <div>
-              <h3>Profile</h3>
-              <p>Update the name shown across the workspace and theorem database.</p>
+              <h3>{t('Profile')}</h3>
+              <p>{t('Update the name shown across the workspace and theorem database.')}</p>
             </div>
           </div>
 
           <label className="account-form-field">
-            <span>Display name</span>
+            <span>{t('Display name')}</span>
             <input
               className="input-field"
               value={profileName}
               onChange={(event) => setProfileName(event.target.value)}
-              placeholder="Your full name"
+              placeholder={t('Your full name')}
               disabled={isSavingProfile}
             />
           </label>
@@ -237,7 +243,7 @@ export function MyPage({
           <div className="account-profile-meta">
             <div className="account-inline-chip">
               <ShieldCheck size={14} />
-              {currentUser.is_admin ? 'Administrator' : 'Member'}
+              {currentUser.is_admin ? t('Administrator') : t('Member')}
             </div>
             <div className="account-inline-chip">
               <Globe size={14} />
@@ -245,7 +251,7 @@ export function MyPage({
             </div>
             <div className="account-inline-chip">
               <FileText size={14} />
-              Joined {new Date(currentUser.created_at).toLocaleString()}
+              {t('Joined {timestamp}', { timestamp: formatDateTime(currentUser.created_at) })}
             </div>
           </div>
 
@@ -257,7 +263,7 @@ export function MyPage({
               disabled={isSavingProfile || profileName.trim().length < 2}
             >
               {isSavingProfile ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}
-              Save Profile
+              {t('Save Profile')}
             </button>
           </div>
         </section>

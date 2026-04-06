@@ -23,6 +23,7 @@ import {
   type ProjectDetail,
   type ProjectSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 import { DiscussionPanel, type DiscussionAnchorSelection } from '../Discussion/DiscussionPanel';
 
 interface ProjectPanelProps {
@@ -42,6 +43,7 @@ export function ProjectPanel({
   onOpenAuth,
   initialSelectedProjectKey = null,
 }: ProjectPanelProps) {
+  const { t } = useI18n();
   const isVisible = variant === 'page' ? true : Boolean(isOpen);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
@@ -113,7 +115,7 @@ export function ProjectPanel({
         );
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load projects.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load projects.'));
         }
       } finally {
         if (isMounted) {
@@ -150,7 +152,7 @@ export function ProjectPanel({
         }
       } catch (detailError: any) {
         if (isMounted) {
-          setError(detailError?.response?.data?.detail ?? 'Failed to load the project detail.');
+          setError(detailError?.response?.data?.detail ?? t('Failed to load the project detail.'));
         }
       } finally {
         if (isMounted) {
@@ -204,7 +206,7 @@ export function ProjectPanel({
 
     const nextTitle = title.trim();
     if (!nextTitle) {
-      setError('Project title is required.');
+      setError(t('Project title is required.'));
       return;
     }
 
@@ -239,7 +241,7 @@ export function ProjectPanel({
       setSelectedProjectKey(`${project.owner_slug}:${project.slug}`);
       resetEditor();
     } catch (createError: any) {
-      setError(createError?.response?.data?.detail ?? 'Failed to create the project.');
+      setError(createError?.response?.data?.detail ?? t('Failed to create the project.'));
     } finally {
       setIsCreating(false);
     }
@@ -270,7 +272,7 @@ export function ProjectPanel({
 
     const nextTitle = title.trim();
     if (!nextTitle) {
-      setError('Project title is required.');
+      setError(t('Project title is required.'));
       return;
     }
 
@@ -301,7 +303,7 @@ export function ProjectPanel({
       }
       handleCancelEdit();
     } catch (updateError: any) {
-      setError(updateError?.response?.data?.detail ?? 'Failed to update the project.');
+      setError(updateError?.response?.data?.detail ?? t('Failed to update the project.'));
     } finally {
       setIsUpdating(false);
     }
@@ -313,7 +315,7 @@ export function ProjectPanel({
       return;
     }
     if (!project.can_delete) {
-      setError('You do not have permission to delete this project.');
+      setError(t('You do not have permission to delete this project.'));
       return;
     }
     if (
@@ -337,7 +339,7 @@ export function ProjectPanel({
       setSelectedProjectDetail(null);
       resetEditor();
     } catch (deleteError: any) {
-      setError(deleteError?.response?.data?.detail ?? 'Failed to delete the project.');
+      setError(deleteError?.response?.data?.detail ?? t('Failed to delete the project.'));
     } finally {
       setIsDeletingProject(false);
     }
@@ -347,20 +349,20 @@ export function ProjectPanel({
     isDetailLoading || !selectedProjectDetail ? (
       <div className="theorem-empty-state">
         <LoaderCircle size={18} className="spin" />
-        Loading project detail...
+        {t('Loading project detail...')}
       </div>
     ) : (
       <div className="project-detail-shell">
         <div className="project-detail-header">
           <div>
-            <div className="account-page-kicker">PROJECT DETAIL</div>
+            <div className="account-page-kicker">{t('PROJECT DETAIL')}</div>
             <h2>{selectedProjectDetail.title}</h2>
-            <p className="auth-helper">Review the project participants and README.</p>
+            <p className="auth-helper">{t('Review the project participants and README.')}</p>
           </div>
           <div className="project-detail-actions">
             <button type="button" className="button-secondary" onClick={() => setSelectedProjectKey(null)}>
               <ArrowLeft size={16} />
-              Back to Projects
+              {t('Back to Projects')}
             </button>
             {selectedProjectDetail.can_edit && (
               <button
@@ -369,7 +371,7 @@ export function ProjectPanel({
                 onClick={() => handleStartEditProject(selectedProjectDetail)}
               >
                 <Pencil size={16} />
-                Edit Project
+                {t('Edit Project')}
               </button>
             )}
             {selectedProjectDetail.can_delete && (
@@ -384,7 +386,7 @@ export function ProjectPanel({
                 ) : (
                   <Trash2 size={16} />
                 )}
-                Delete Project
+                {t('Delete Project')}
               </button>
             )}
             {selectedProjectDetail.github_url && (
@@ -394,7 +396,7 @@ export function ProjectPanel({
                 onClick={() => window.open(selectedProjectDetail.github_url!, '_blank', 'noopener,noreferrer')}
               >
                 <ExternalLink size={16} />
-                Open GitHub
+                {t('Open GitHub')}
               </button>
             )}
           </div>
@@ -411,17 +413,17 @@ export function ProjectPanel({
           <div className="glass-panel project-editor-panel">
             <div className="auth-input-grid">
               <label>
-                <span className="auth-field-label">Project title</span>
+                <span className="auth-field-label">{t('Project title')}</span>
                 <input
                   className="input-field"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Project title"
+                  placeholder={t('Project title')}
                   maxLength={255}
                 />
               </label>
               <label>
-                <span className="auth-field-label">GitHub link</span>
+                <span className="auth-field-label">{t('GitHub link')}</span>
                 <input
                   className="input-field"
                   value={githubUrl}
@@ -431,19 +433,19 @@ export function ProjectPanel({
                 />
               </label>
               <label>
-                <span className="auth-field-label">Visibility</span>
+                <span className="auth-field-label">{t('Visibility')}</span>
                 <select
                   className="input-field"
                   value={visibility}
                   onChange={(event) => setVisibility(event.target.value as 'public' | 'private')}
                 >
-                  <option value="private">Private</option>
-                  <option value="public">Public</option>
+                  <option value="private">{t('Private')}</option>
+                  <option value="public">{t('Public')}</option>
                 </select>
               </label>
             </div>
             <label className="project-readme-field">
-              <span className="auth-field-label">README.md</span>
+              <span className="auth-field-label">{t('README.md')}</span>
               <textarea
                 className="proof-textarea project-readme-textarea"
                 value={readmeContent}
@@ -459,10 +461,10 @@ export function ProjectPanel({
                 disabled={isUpdating}
               >
                 {isUpdating ? <LoaderCircle size={16} className="spin" /> : <Pencil size={16} />}
-                Save Changes
+                {t('Save Changes')}
               </button>
               <button type="button" className="button-secondary" onClick={handleCancelEdit}>
-                Cancel
+                {t('Cancel')}
               </button>
             </div>
           </div>
@@ -475,8 +477,8 @@ export function ProjectPanel({
                 <Users size={18} />
               </div>
               <div>
-                <h3>Participants</h3>
-                <p>Current project members tracked by the project manifest.</p>
+                <h3>{t('Participants')}</h3>
+                <p>{t('Current project members tracked by the project manifest.')}</p>
               </div>
             </div>
             <div className="account-card-list">
@@ -506,7 +508,7 @@ export function ProjectPanel({
               </div>
               <div>
                 <h3>{selectedProjectDetail.readme_path}</h3>
-                <p>Project overview and usage notes saved in the project root.</p>
+                <p>{t('Project overview and usage notes saved in the project root.')}</p>
               </div>
             </div>
             <div className="project-readme-content project-readme-markdown">
@@ -521,8 +523,8 @@ export function ProjectPanel({
               <FileText size={18} />
             </div>
             <div>
-              <h3>Discussions</h3>
-              <p>Keep project decisions attached to the project itself instead of a separate board.</p>
+              <h3>{t('Discussions')}</h3>
+              <p>{t('Keep project decisions attached to the project itself instead of a separate board.')}</p>
             </div>
           </div>
           <div className="discussion-tab-bar">
@@ -531,36 +533,36 @@ export function ProjectPanel({
               className={`discussion-tab ${discussionTab === 'general' ? 'is-active' : ''}`}
               onClick={() => setDiscussionTab('general')}
             >
-              General
+              {t('General')}
             </button>
             <button
               type="button"
               className={`discussion-tab ${discussionTab === 'readme' ? 'is-active' : ''}`}
               onClick={() => setDiscussionTab('readme')}
             >
-              README
+              {t('README')}
             </button>
           </div>
           {discussionTab === 'general' ? (
             <DiscussionPanel
-              title="Project Discussion"
+              title={t('Project Discussion')}
               currentUser={currentUser}
               onOpenAuth={onOpenAuth}
               scopeType="project"
               scopeKey={projectScopeKey}
               anchorType="general"
-              emptyMessage="No project-wide discussion has started yet."
+              emptyMessage={t('No project-wide discussion has started yet.')}
             />
           ) : (
             <DiscussionPanel
-              title="README Discussion"
+              title={t('README Discussion')}
               currentUser={currentUser}
               onOpenAuth={onOpenAuth}
               scopeType="project"
               scopeKey={projectScopeKey}
               anchorType="project_readme"
               currentAnchor={readmeAnchor}
-              emptyMessage="No README discussion threads exist for this project yet."
+              emptyMessage={t('No README discussion threads exist for this project yet.')}
             />
           )}
         </section>
@@ -573,11 +575,11 @@ export function ProjectPanel({
           <FolderOpen size={18} color="var(--secondary-accent)" />
         </div>
         <div>
-          <h2>Projects</h2>
+          <h2>{t('Projects')}</h2>
           <p className="auth-helper">
             {currentUser
-              ? 'Click a project card to open its detail page with participants and README.'
-              : 'Browse public projects without signing in. Sign in only if you want to create or manage projects.'}
+              ? t('Click a project card to open its detail page with participants and README.')
+              : t('Browse public projects without signing in. Sign in only if you want to create or manage projects.')}
           </p>
         </div>
       </div>
@@ -585,7 +587,7 @@ export function ProjectPanel({
       {currentUser ? (
         <div className="auth-input-grid" style={{ marginBottom: '16px' }}>
           <label>
-            <span className="auth-field-label">Project title</span>
+            <span className="auth-field-label">{t('Project title')}</span>
             <input
               className="input-field"
               value={title}
@@ -595,7 +597,7 @@ export function ProjectPanel({
             />
           </label>
           <label>
-            <span className="auth-field-label">GitHub link</span>
+            <span className="auth-field-label">{t('GitHub link')}</span>
             <input
               className="input-field"
               value={githubUrl}
@@ -605,14 +607,14 @@ export function ProjectPanel({
             />
           </label>
           <label>
-            <span className="auth-field-label">Visibility</span>
+            <span className="auth-field-label">{t('Visibility')}</span>
             <select
               className="input-field"
               value={visibility}
               onChange={(event) => setVisibility(event.target.value as 'public' | 'private')}
             >
-              <option value="private">Private</option>
-              <option value="public">Public</option>
+              <option value="private">{t('Private')}</option>
+              <option value="public">{t('Public')}</option>
             </select>
           </label>
           <button
@@ -622,16 +624,18 @@ export function ProjectPanel({
             disabled={isCreating}
           >
             {isCreating ? <LoaderCircle size={16} className="spin" /> : <Plus size={16} />}
-            Create Project
+            {t('Create Project')}
           </button>
         </div>
       ) : (
         <div className="project-public-banner" style={{ marginBottom: '16px' }}>
           <div className="auth-helper">
-            Public projects are visible below even while signed out. Private projects remain hidden until you sign in.
+            {t(
+              'Public projects are visible below even while signed out. Private projects remain hidden until you sign in.',
+            )}
           </div>
           <button type="button" className="button-secondary" onClick={onOpenAuth}>
-            Login / Register
+            {t('Login / Register')}
           </button>
         </div>
       )}
@@ -639,13 +643,13 @@ export function ProjectPanel({
       {isLoading ? (
         <div className="theorem-empty-state">
           <LoaderCircle size={18} className="spin" />
-          Loading projects...
+          {t('Loading projects...')}
         </div>
       ) : projects.length === 0 ? (
         <div className="theorem-empty-state">
           {currentUser
-            ? 'Create a project to scaffold Package/Main.lean and README.md.'
-            : 'No public projects are available yet.'}
+            ? t('Create a project to scaffold Package/Main.lean and README.md.')
+            : t('No public projects are available yet.')}
         </div>
       ) : (
         <div className="theorem-card-list">
@@ -665,14 +669,14 @@ export function ProjectPanel({
                   <span className="proof-badge">{project.package_name}</span>
                   <span className="proof-badge">{project.visibility}</span>
                   {project.can_edit ? (
-                    <span className="proof-badge">yours</span>
+                    <span className="proof-badge">{t('yours')}</span>
                   ) : (
                     <span className="proof-badge">{project.owner_slug}</span>
                   )}
                 </div>
               </div>
               <p className="theorem-card-statement">
-                Entry module: {project.entry_module_name}
+                {t('Entry module: {name}', { name: project.entry_module_name })}
               </p>
               {project.github_url && (
                 <p className="theorem-card-statement" style={{ marginTop: '8px' }}>
@@ -689,7 +693,12 @@ export function ProjectPanel({
   const content = (
     <>
       {variant === 'modal' && onClose ? (
-        <button className="auth-close" type="button" onClick={onClose} aria-label="Close project panel">
+        <button
+          className="auth-close"
+          type="button"
+          onClick={onClose}
+          aria-label={t('Close project panel')}
+        >
           <X size={18} />
         </button>
       ) : null}
