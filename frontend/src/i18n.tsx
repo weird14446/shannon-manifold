@@ -43,6 +43,12 @@ const TRANSLATIONS: Record<AppLanguage, Record<string, string>> = {
     'Refresh': '새로고침',
     'Select a verified code entry from the dashboard.': '대시보드에서 검증된 코드 항목을 선택하세요.',
     'Theorem Oracle': '정리 오라클',
+    'Floating': '플로팅',
+    'Dock left': '왼쪽 도킹',
+    'Dock right': '오른쪽 도킹',
+    'Docked': '도킹',
+    'Switch to floating chat': '플로팅 챗으로 전환',
+    'Switch to docked chat': '도킹 챗으로 전환',
     'Signed in as {name}': '{name} 계정으로 로그인됨',
     'Sign in to ask questions about Lean4, Rocq, and proofs.':
       'Lean4, Rocq, 증명에 대해 질문하려면 로그인하세요.',
