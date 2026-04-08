@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { chatWithOracle, type AuthUser, type ChatCodeContextPayload } from '../../api';
+import { useI18n } from '../../i18n';
 import { LeanCodeHighlighter } from '../TheoremList/LeanCodeHighlighter';
 
 interface Message {
@@ -128,11 +129,13 @@ export function Chatbot({
   defaultAttachmentFile = null,
   onApplySuggestedCode,
 }: ChatbotProps) {
+  const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content:
+      content: t(
         'Hello! I am the Shannon Manifold Theorem Oracle. Ask about proofs, Lean4, imports, or have me draft code with you.',
+      ),
     },
   ]);
   const [input, setInput] = useState('');
@@ -160,7 +163,7 @@ export function Chatbot({
 
     if (!input.trim() && !effectiveAttachmentFile) return;
 
-    const prompt = input.trim() || 'Please analyze the attached file.';
+    const prompt = input.trim() || t('Please analyze the attached file.');
     const attachmentLabel = effectiveAttachmentFile ? effectiveAttachmentFile.name : null;
     const displayContent = attachmentLabel
       ? input.trim()
@@ -198,12 +201,12 @@ export function Chatbot({
         onOpenAuth();
         setMessages((prev) => [
           ...prev,
-          { role: 'assistant', content: 'Your session expired. Please sign in again to continue.' }
+          { role: 'assistant', content: t('Your session expired. Please sign in again to continue.') }
         ]);
       } else {
         const detail =
           (error as any)?.response?.data?.detail ||
-          'Error communicating with the Oracle.';
+          t('Error communicating with the Oracle.');
         setMessages((prev) => [...prev, { role: 'assistant', content: String(detail) }]);
       }
     } finally {
@@ -219,39 +222,43 @@ export function Chatbot({
             <div className="chat-context-header">
               <div className="chat-context-label">
                 <Code2 size={14} />
-                Proof-State-Aware Copilot
+                {t('Proof-State-Aware Copilot')}
               </div>
               <button
                 type="button"
                 className="chat-context-toggle"
                 onClick={() => setIsContextVisible(false)}
-                aria-label="Hide copilot context"
+                aria-label={t('Hide copilot context')}
               >
                 <X size={14} />
               </button>
             </div>
             <div className="chat-context-title">{codeContext.title}</div>
             <div className="chat-context-meta">
-              {codeContext.module_name || 'Unsaved module'}
+              {codeContext.module_name || t('Unsaved module')}
               {codeContext.path ? ` · ${codeContext.path}` : ''}
             </div>
             <div className="chat-context-grid">
               <div className="chat-context-chip">
-                Cursor {codeContext.cursor_line ?? '?'}:{codeContext.cursor_column ?? '?'}
+                {t('Cursor {line}:{column}', {
+                  line: String(codeContext.cursor_line ?? '?'),
+                  column: String(codeContext.cursor_column ?? '?'),
+                })}
               </div>
               <div className="chat-context-chip">
-                {codeContext.imports?.length ?? 0} imports
+                {t('{count} imports', { count: String(codeContext.imports?.length ?? 0) })}
               </div>
             </div>
             {codeContext.active_goal && (
               <div className="chat-context-goal">
-                <div className="chat-context-goal-label">Active Goal</div>
+                <div className="chat-context-goal-label">{t('Active Goal')}</div>
                 <pre>{codeContext.active_goal}</pre>
               </div>
             )}
             <div className="chat-context-helper">
-              The Oracle will use the current file, imports, cursor location, nearby code, and
-              current infoview goal to suggest tactics or revise the Lean file.
+              {t(
+                'The Oracle will use the current file, imports, cursor location, nearby code, and current infoview goal to suggest tactics or revise the Lean file.',
+              )}
             </div>
           </div>
         ) : (
@@ -262,11 +269,11 @@ export function Chatbot({
           >
             <span className="chat-context-label">
               <Code2 size={14} />
-              Proof-State-Aware Copilot
+              {t('Proof-State-Aware Copilot')}
             </span>
             <span className="chat-context-collapsed-action">
               <ChevronDown size={14} />
-              Show
+              {t('Show')}
             </span>
           </button>
         ))}
@@ -280,7 +287,7 @@ export function Chatbot({
           >
             <div className="chat-message-meta">
               {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
-              <span>{msg.role === 'assistant' ? 'Oracle' : 'You'}</span>
+              <span>{msg.role === 'assistant' ? t('Oracle') : t('You')}</span>
             </div>
             {renderMessageContent(stripSuggestedCodeBlock(msg.content, msg.suggestedCode))}
             {msg.role === 'assistant' && msg.suggestedCode && (
@@ -288,7 +295,9 @@ export function Chatbot({
                 <div className="chat-code-suggestion-head">
                   <div className="chat-code-suggestion-title">
                     <Sparkles size={14} />
-                    Suggested {msg.suggestedLanguage || 'code'}
+                    {t('Suggested {language}', {
+                      language: msg.suggestedLanguage || t('code'),
+                    })}
                   </div>
                   {onApplySuggestedCode && (
                     <button
@@ -297,11 +306,11 @@ export function Chatbot({
                       onClick={() =>
                         onApplySuggestedCode({
                           code: msg.suggestedCode ?? '',
-                          title: codeContext?.title || 'Oracle Draft',
+                          title: codeContext?.title || t('Oracle Draft'),
                         })
                       }
                     >
-                      Apply to Playground
+                      {t('Apply to Playground')}
                     </button>
                   )}
                 </div>
@@ -320,7 +329,7 @@ export function Chatbot({
         ))}
         {isLoading && (
           <div style={{ alignSelf: 'flex-start', padding: '12px', color: 'var(--text-secondary)' }} className="animate-fade-in">
-            Oracle is thinking...
+            {t('Oracle is thinking...')}
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -333,7 +342,7 @@ export function Chatbot({
           onClick={onOpenAuth}
         >
           <LockKeyhole size={16} />
-          Sign in to ask questions and keep your member session in the MySQL-backed workspace.
+          {t('Sign in to ask questions and keep your member session in the MySQL-backed workspace.')}
         </button>
       )}
 
@@ -350,7 +359,7 @@ export function Chatbot({
               type="button"
               className="chat-attachment-remove"
               onClick={() => setAttachedFile(null)}
-              aria-label="Remove attached file"
+              aria-label={t('Remove attached file')}
             >
               <X size={14} />
             </button>
@@ -376,7 +385,9 @@ export function Chatbot({
                 ...prev,
                 {
                   role: 'assistant',
-                  content: 'Only PDF, PNG, JPG, JPEG, WEBP, and GIF files can be attached right now.',
+                  content: t(
+                    'Only PDF, PNG, JPG, JPEG, WEBP, and GIF files can be attached right now.',
+                  ),
                 },
               ]);
               event.target.value = '';
@@ -393,7 +404,7 @@ export function Chatbot({
           onClick={() => attachmentInputRef.current?.click()}
           disabled={!currentUser || isLoading}
           style={{ padding: '10px' }}
-          aria-label="Attach file to chat"
+          aria-label={t('Attach file to chat')}
         >
           <Paperclip size={18} />
         </button>
@@ -403,9 +414,9 @@ export function Chatbot({
           placeholder={
             currentUser
               ? codeContext
-                ? 'Ask for the next tactic, a lemma search, a Lean edit, or attach a PDF/image...'
-                : 'Ask a question, request a Lean draft, or attach a PDF/image...'
-              : 'Login required to use the Oracle'
+                ? t('Ask for the next tactic, a lemma search, a Lean edit, or attach a PDF/image...')
+                : t('Ask a question, request a Lean draft, or attach a PDF/image...')
+              : t('Login required to use the Oracle')
           }
           value={input}
           onChange={(e) => setInput(e.target.value)}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { getLeanImportGraph, type LeanImportGraph } from '../../api';
+import { useI18n } from '../../i18n';
 
 export interface GraphProjectFilterOption {
   value: string;
@@ -47,6 +48,7 @@ export function AgentGraph({
   onProjectOptionsChange,
   hideProjectFilter = false,
 }: AgentGraphProps) {
+  const { t } = useI18n();
   const [graphData, setGraphData] = useState<LeanImportGraph>({ nodes: [], links: [] });
   const [internalProjectFilter, setInternalProjectFilter] = useState('all');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -187,11 +189,11 @@ export function AgentGraph({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '0.78rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
-              Graph Filter
+              {t('Graph Filter')}
             </div>
-            <div style={{ fontWeight: 600 }}>Lean Project Scope</div>
+            <div style={{ fontWeight: 600 }}>{t('Lean Project Scope')}</div>
           </div>
-          <span className="proof-badge">{filteredNodeCount} modules</span>
+          <span className="proof-badge">{t('{count} modules', { count: String(filteredNodeCount) })}</span>
         </div>
         <select
           className="input-field"
@@ -203,8 +205,8 @@ export function AgentGraph({
             onProjectFilterChange?.(event.target.value);
           }}
         >
-          <option value="all">All indexed modules</option>
-          <option value="shared">Shared workspace only</option>
+          <option value="all">{t('All indexed modules')}</option>
+          <option value="shared">{t('Shared workspace only')}</option>
           {projectOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label} ({option.count})
@@ -213,14 +215,14 @@ export function AgentGraph({
         </select>
         <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
           {activeProjectFilter === 'all'
-            ? 'Showing every indexed Lean module in the manifold.'
+            ? t('Showing every indexed Lean module in the manifold.')
             : activeProjectFilter === 'shared'
-              ? 'Showing only modules saved outside project roots.'
-              : 'Showing only modules indexed from the selected Lean project root.'}
+              ? t('Showing only modules saved outside project roots.')
+              : t('Showing only modules indexed from the selected Lean project root.')}
         </div>
         {filteredNodeCount === 0 && (
           <div style={{ fontSize: '0.82rem', color: '#ffcf8b' }}>
-            No indexed Lean modules are available for this scope yet. Save a project file to add it to the manifold.
+            {t('No indexed Lean modules are available for this scope yet. Save a project file to add it to the manifold.')}
           </div>
         )}
       </div>

@@ -141,7 +141,9 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
     if (
       typeof window !== 'undefined' &&
       !window.confirm(
-        `Delete user "${user.full_name}"? Their projects, workspaces, and verified code will be removed.`,
+        t('Delete user "{name}"? Their projects, workspaces, and verified code will be removed.', {
+          name: user.full_name,
+        }),
       )
     ) {
       return;
@@ -165,7 +167,9 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
     if (
       typeof window !== 'undefined' &&
       !window.confirm(
-        `Delete project "${project.title}"? Its project workspace files will be removed.`,
+        t('Delete project "{title}"? Its project workspace files will be removed.', {
+          title: project.title,
+        }),
       )
     ) {
       return;
@@ -188,7 +192,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
   const handleDeleteDocument = async (document: IndexedProofSummary) => {
     if (
       typeof window !== 'undefined' &&
-      !window.confirm(`Delete verified code "${document.title}"?`)
+      !window.confirm(t('Delete verified code "{title}"?', { title: document.title }))
     ) {
       return;
     }
@@ -266,15 +270,15 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
             <ShieldCheck size={18} />
           </div>
           <div>
-            <h3>Platform Stats</h3>
-            <p>Current counts across users, projects, verified documents, and proof workspaces.</p>
+            <h3>{t('Platform Stats')}</h3>
+            <p>{t('Current counts across users, projects, verified documents, and proof workspaces.')}</p>
           </div>
         </div>
 
         {isLoading || !overview ? (
           <div className="theorem-empty-state">
             <LoaderCircle size={18} className="spin" />
-            Loading platform stats...
+            {t('Loading platform stats...')}
           </div>
         ) : (
           <div className="account-stat-grid">
@@ -295,15 +299,15 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
               <Users size={18} />
             </div>
             <div>
-              <h3>User Directory</h3>
-              <p>{adminUsers.length} administrators currently active across the platform.</p>
+              <h3>{t('User Directory')}</h3>
+              <p>{t('{count} administrators currently active across the platform.', { count: String(adminUsers.length) })}</p>
             </div>
           </div>
 
           {isLoading || !overview ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={18} className="spin" />
-              Loading users...
+              {t('Loading users...')}
             </div>
           ) : (
             <div className="account-user-directory-scroller">
@@ -314,25 +318,25 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
                       <div>
                         <div className="account-list-title">{user.full_name}</div>
                         <div className="account-list-meta">
-                          {user.email} · Joined {new Date(user.created_at).toLocaleDateString()}
+                          {user.email} · {t('Joined {timestamp}', { timestamp: new Date(user.created_at).toLocaleDateString() })}
                         </div>
                       </div>
                       <span className={user.is_admin ? 'proof-badge' : 'proof-readonly-pill'}>
-                        {user.is_admin ? 'admin' : 'member'}
+                        {user.is_admin ? t('admin') : t('member')}
                       </span>
                     </div>
 
                     <div className="account-user-directory-counts">
                       <div className="account-user-directory-count">
-                        <span>Projects</span>
+                        <span>{t('Projects')}</span>
                         <strong>{user.project_count}</strong>
                       </div>
                       <div className="account-user-directory-count">
-                        <span>Verified</span>
+                        <span>{t('Verified')}</span>
                         <strong>{user.verified_document_count}</strong>
                       </div>
                       <div className="account-user-directory-count">
-                        <span>Workspaces</span>
+                        <span>{t('Workspaces')}</span>
                         <strong>{user.proof_workspace_count}</strong>
                       </div>
                     </div>
@@ -352,7 +356,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
                         ) : (
                           <UserCog size={16} />
                         )}
-                        {user.is_admin ? 'Revoke Admin' : 'Grant Admin'}
+                        {user.is_admin ? t('Revoke Admin') : t('Grant Admin')}
                       </button>
                       <button
                         type="button"
@@ -365,7 +369,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
                         ) : (
                           <Trash2 size={16} />
                         )}
-                        Delete User
+                        {t('Delete User')}
                       </button>
                     </div>
                   </div>
@@ -381,20 +385,20 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
               <FolderKanban size={18} />
             </div>
             <div>
-              <h3>Project Catalog</h3>
-              <p>All project manifests currently registered in the shared Lean workspace.</p>
+              <h3>{t('Project Catalog')}</h3>
+              <p>{t('All project manifests currently registered in the shared Lean workspace.')}</p>
             </div>
           </div>
 
           {isLoading || !overview ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={18} className="spin" />
-              Loading projects...
+              {t('Loading projects...')}
             </div>
           ) : overview.projects.length === 0 ? (
             <div className="theorem-empty-state">
               <Sparkles size={18} />
-              No projects have been created yet.
+              {t('No projects have been created yet.')}
             </div>
           ) : (
             <div className="account-card-list">
@@ -408,11 +412,11 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
                       </div>
                     </div>
                     <div className="account-badge-row">
-                      <span className="proof-badge">{project.visibility}</span>
+                      <span className="proof-badge">{t(project.visibility === 'public' ? 'Public' : 'Private')}</span>
                       <span className="proof-badge">{project.package_name}</span>
                     </div>
                   </div>
-	                  <div className="account-list-copy">Entry module: {project.entry_module_name}</div>
+	                  <div className="account-list-copy">{t('Entry module: {name}', { name: project.entry_module_name })}</div>
 	                  <div className="account-page-actions">
 	                    {project.github_url && (
 	                      <a
@@ -421,7 +425,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
 	                        target="_blank"
 	                        rel="noreferrer"
 	                      >
-	                        Open GitHub Link
+	                        {t('Open GitHub Link')}
 	                      </a>
 	                    )}
 	                    <button
@@ -435,7 +439,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
 	                      ) : (
 	                        <Trash2 size={16} />
 	                      )}
-	                      Delete Project
+	                      {t('Delete Project')}
 	                    </button>
 	                  </div>
 	                </div>
@@ -451,20 +455,20 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
 	            <ShieldCheck size={18} />
 	          </div>
 	          <div>
-	            <h3>Verified Code</h3>
-	            <p>Administrators can remove verified code entries directly from here.</p>
+	            <h3>{t('Verified Code')}</h3>
+	            <p>{t('Administrators can remove verified code entries directly from here.')}</p>
 	          </div>
 	        </div>
 
 	        {isLoadingDocuments ? (
 	          <div className="theorem-empty-state">
 	            <LoaderCircle size={18} className="spin" />
-	            Loading verified code...
+	            {t('Loading verified code...')}
 	          </div>
 	        ) : verifiedDocuments.length === 0 ? (
 	          <div className="theorem-empty-state">
 	            <Sparkles size={18} />
-	            No verified code entries are available.
+	            {t('No verified code entries are available.')}
 	          </div>
 	        ) : (
 	          <div className="account-card-list">
@@ -474,13 +478,13 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
 	                  <div>
 	                    <div className="account-list-title">{document.title}</div>
 	                    <div className="account-list-meta">
-	                      {document.path || document.module_name || 'Verified code entry'}
+	                      {document.path || document.module_name || t('Verified code entry')}
 	                    </div>
 	                  </div>
 	                  <div className="account-badge-row">
-	                    <span className="proof-badge">{document.source_kind}</span>
+	                    <span className="proof-badge">{t(document.source_kind)}</span>
 	                    <span className="proof-badge">{document.proof_language}</span>
-	                    {document.has_pdf && <span className="proof-badge">pdf</span>}
+	                    {document.has_pdf && <span className="proof-badge">{t('pdf')}</span>}
 	                  </div>
 	                </div>
 	                <div className="account-list-copy">{document.statement}</div>
@@ -496,7 +500,7 @@ export function AdminPage({ currentUser, onOpenAuth, onUserUpdated }: AdminPageP
 	                    ) : (
 	                      <Trash2 size={16} />
 	                    )}
-	                    Delete Verified Code
+	                    {t('Delete Verified Code')}
 	                  </button>
 	                </div>
 	              </div>

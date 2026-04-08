@@ -261,12 +261,12 @@ export function CommunityHome({
                 </div>
                 <div className="community-card-footer">
                   <span>{heroPost.author_name}</span>
-                  <span>{heroPost.comment_count} comments</span>
+                  <span>{t('{count} comments', { count: String(heroPost.comment_count) })}</span>
                 </div>
               </button>
             ) : (
               <div className="glass-panel theorem-empty-state">
-                No published community posts match the current filters.
+                {t('No published community posts match the current filters.')}
               </div>
             )}
 
@@ -274,10 +274,10 @@ export function CommunityHome({
               <div className="community-section-header">
                 <div className="community-kicker">
                   <Telescope size={16} />
-                  Latest Archive
+                  {t('Latest Archive')}
                 </div>
                 <p className="community-section-copy">
-                  Browse recent long-form notes, theorem reviews, papers, and project logs.
+                  {t('Browse recent long-form notes, theorem reviews, papers, and project logs.')}
                 </p>
               </div>
               <div className="community-archive-list">
@@ -296,8 +296,8 @@ export function CommunityHome({
                         </div>
                       </div>
                       <div className="community-card-badges">
-                        <span className="proof-badge">{CATEGORY_LABELS[post.category]}</span>
-                        {post.is_featured ? <span className="proof-badge">Featured</span> : null}
+                        <span className="proof-badge">{t(CATEGORY_LABELS[post.category])}</span>
+                        {post.is_featured ? <span className="proof-badge">{t('Featured')}</span> : null}
                       </div>
                     </div>
                     <p className="community-post-card-summary">{post.summary}</p>
@@ -309,7 +309,7 @@ export function CommunityHome({
                       ))}
                     </div>
                     <div className="community-card-footer">
-                      <span>{post.comment_count} comments</span>
+                      <span>{t('{count} comments', { count: String(post.comment_count) })}</span>
                       {post.primary_artifact ? <span>{post.primary_artifact.title}</span> : null}
                     </div>
                   </button>
@@ -324,19 +324,19 @@ export function CommunityHome({
                 <div className="community-section-header">
                   <div className="community-kicker">
                     <PenSquare size={16} />
-                    My Drafts
+                    {t('My Drafts')}
                   </div>
                   <p className="community-section-copy">
-                    Private drafts stay visible only to you until they are published.
+                    {t('Private drafts stay visible only to you until they are published.')}
                   </p>
                 </div>
                 {isLoadingDrafts ? (
                   <div className="theorem-empty-state">
                     <LoaderCircle size={16} className="spin" />
-                    Loading drafts...
+                    {t('Loading drafts...')}
                   </div>
                 ) : drafts.length === 0 ? (
-                  <div className="community-empty-state">No private drafts yet.</div>
+                  <div className="community-empty-state">{t('No private drafts yet.')}</div>
                 ) : (
                   <div className="community-side-list">
                     {drafts.map((post) => (
@@ -347,7 +347,7 @@ export function CommunityHome({
                         onClick={() => onOpenPost(post.id)}
                       >
                         <strong>{post.title}</strong>
-                        <span>{CATEGORY_LABELS[post.category]}</span>
+                        <span>{t(CATEGORY_LABELS[post.category])}</span>
                       </button>
                     ))}
                   </div>
@@ -356,18 +356,18 @@ export function CommunityHome({
             ) : null}
 
             <section className="glass-panel community-side-panel">
-              <div className="community-section-header">
-                <div className="community-kicker">
-                  <Telescope size={16} />
-                  Referenced Artifacts
+                <div className="community-section-header">
+                  <div className="community-kicker">
+                    <Telescope size={16} />
+                    {t('Referenced Artifacts')}
+                  </div>
+                  <p className="community-section-copy">
+                    {t('Community posts can point back to verified theorems and projects.')}
+                  </p>
                 </div>
-                <p className="community-section-copy">
-                  Community posts can point back to verified theorems and projects.
-                </p>
-              </div>
               {referencedArtifacts.length === 0 ? (
                 <div className="community-empty-state">
-                  No theorem or project references are visible in the current archive.
+                  {t('No theorem or project references are visible in the current archive.')}
                 </div>
               ) : (
                 <div className="community-side-list">
@@ -378,7 +378,7 @@ export function CommunityHome({
                     >
                       <strong>{artifact.title}</strong>
                       <span>
-                        {artifact.artifact_type === 'theorem' ? 'Theorem' : 'Project'} · {artifact.subtitle}
+                        {artifact.artifact_type === 'theorem' ? t('Theorem') : t('Project')} · {artifact.subtitle}
                       </span>
                     </div>
                   ))}

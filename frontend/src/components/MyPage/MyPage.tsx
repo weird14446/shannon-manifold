@@ -274,48 +274,48 @@ export function MyPage({
               <FolderKanban size={18} />
             </div>
             <div>
-              <h3>Workspace Stats</h3>
-              <p>Your current footprint and import-based impact across projects and verified Lean code.</p>
+              <h3>{t('Workspace Stats')}</h3>
+              <p>{t('Your current footprint and import-based impact across projects and verified Lean code.')}</p>
             </div>
           </div>
 
           {isLoading ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={18} className="spin" />
-              Loading account stats...
+              {t('Loading account stats...')}
             </div>
           ) : (
             <div className="account-stat-grid">
               <div className="account-stat-card">
-                <span>Projects</span>
+                <span>{t('Projects')}</span>
                 <strong>{stats.projectCount}</strong>
               </div>
               <div className="account-stat-card">
-                <span>Public Projects</span>
+                <span>{t('Public Projects')}</span>
                 <strong>{stats.publicProjectCount}</strong>
               </div>
               <div className="account-stat-card">
-                <span>Private Projects</span>
+                <span>{t('Private Projects')}</span>
                 <strong>{stats.privateProjectCount}</strong>
               </div>
               <div className="account-stat-card">
-                <span>Verified Code</span>
+                <span>{t('Verified Code')}</span>
                 <strong>{stats.verifiedCodeCount}</strong>
               </div>
               <div className="account-stat-card">
-                <span>h-index</span>
+                <span>{t('h-index')}</span>
                 <strong>{stats.hIndex}</strong>
               </div>
               <div className="account-stat-card">
-                <span>g-index</span>
+                <span>{t('g-index')}</span>
                 <strong>{stats.gIndex}</strong>
               </div>
               <div className="account-stat-card">
-                <span>Proof Workspaces</span>
+                <span>{t('Proof Workspaces')}</span>
                 <strong>{stats.proofWorkspaceCount}</strong>
               </div>
               <div className="account-stat-card">
-                <span>PDF Workspaces</span>
+                <span>{t('PDF Workspaces')}</span>
                 <strong>{stats.pdfWorkspaceCount}</strong>
               </div>
             </div>
@@ -330,20 +330,20 @@ export function MyPage({
               <FolderKanban size={18} />
             </div>
             <div>
-              <h3>Your Projects</h3>
-              <p>Only projects you own appear here, including private workspaces.</p>
+              <h3>{t('Your Projects')}</h3>
+              <p>{t('Only projects you own appear here, including private workspaces.')}</p>
             </div>
           </div>
 
           {isLoading ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={18} className="spin" />
-              Loading projects...
+              {t('Loading projects...')}
             </div>
           ) : projects.length === 0 ? (
             <div className="theorem-empty-state">
               <Lock size={18} />
-              You have not created any projects yet.
+              {t('You have not created any projects yet.')}
             </div>
           ) : (
             <div className="account-card-list">
@@ -355,11 +355,11 @@ export function MyPage({
                       <div className="account-list-meta">{project.project_root}</div>
                     </div>
                     <div className="account-badge-row">
-                      <span className="proof-badge">{project.visibility}</span>
+                      <span className="proof-badge">{t(project.visibility === 'public' ? 'Public' : 'Private')}</span>
                       <span className="proof-badge">{project.package_name}</span>
                     </div>
                   </div>
-                  <div className="account-list-copy">Entry module: {project.entry_module_name}</div>
+                  <div className="account-list-copy">{t('Entry module: {name}', { name: project.entry_module_name })}</div>
                   <div className="account-page-actions">
                     <button
                       type="button"
@@ -367,11 +367,11 @@ export function MyPage({
                       onClick={() => onOpenProject(project.owner_slug, project.slug)}
                     >
                       <FolderKanban size={16} />
-                      Open Project
+                      {t('Open Project')}
                     </button>
                     {project.github_url && (
                       <a className="button-secondary" href={project.github_url} target="_blank" rel="noreferrer">
-                        GitHub Link
+                        {t('GitHub Link')}
                       </a>
                     )}
                   </div>
@@ -387,20 +387,20 @@ export function MyPage({
               <BookOpenText size={18} />
             </div>
             <div>
-              <h3>Your Verified Code</h3>
-              <p>Recent Lean entries you can still edit from the verified database.</p>
+              <h3>{t('Your Verified Code')}</h3>
+              <p>{t('Recent Lean entries you can still edit from the verified database.')}</p>
             </div>
           </div>
 
           {isLoading ? (
             <div className="theorem-empty-state">
               <LoaderCircle size={18} className="spin" />
-              Loading verified code...
+              {t('Loading verified code...')}
             </div>
           ) : proofs.length === 0 ? (
             <div className="theorem-empty-state">
               <Sparkles size={18} />
-              Save a Lean file into the verified database to populate this section.
+              {t('Save a Lean file into the verified database to populate this section.')}
             </div>
           ) : (
             <div className="account-card-list">
@@ -410,12 +410,12 @@ export function MyPage({
                     <div>
                       <div className="account-list-title">{proof.title}</div>
                       <div className="account-list-meta">
-                        {proof.module_name ?? proof.path ?? 'Workspace module'}
+                        {proof.module_name ?? proof.path ?? t('Workspace module')}
                       </div>
                     </div>
                     <div className="account-badge-row">
                       <span className="proof-badge">{proof.proof_language}</span>
-                      {proof.project_root && <span className="proof-badge">project</span>}
+                      {proof.project_root && <span className="proof-badge">{t('project')}</span>}
                     </div>
                   </div>
                   <div className="account-list-copy">{proof.statement}</div>
@@ -425,7 +425,7 @@ export function MyPage({
                       className="button-secondary"
                       onClick={() => onOpenProof(proof.id)}
                     >
-                      Open Detail
+                      {t('Open Detail')}
                     </button>
                   </div>
                 </div>
@@ -441,20 +441,20 @@ export function MyPage({
             <FileText size={18} />
           </div>
           <div>
-            <h3>Your Proof Workspaces</h3>
-            <p>Drafts and PDF-backed proof workspaces tied to your account.</p>
+            <h3>{t('Your Proof Workspaces')}</h3>
+            <p>{t('Drafts and PDF-backed proof workspaces tied to your account.')}</p>
           </div>
         </div>
 
         {isLoading ? (
           <div className="theorem-empty-state">
             <LoaderCircle size={18} className="spin" />
-            Loading proof workspaces...
+            {t('Loading proof workspaces...')}
           </div>
         ) : workspaces.length === 0 ? (
           <div className="theorem-empty-state">
             <Sparkles size={18} />
-            No proof workspaces found yet.
+            {t('No proof workspaces found yet.')}
           </div>
         ) : (
           <div className="account-card-list">
@@ -468,12 +468,12 @@ export function MyPage({
                     </div>
                   </div>
                   <div className="account-badge-row">
-                    <span className="proof-badge">{workspace.status}</span>
-                    {workspace.has_pdf && <span className="proof-badge">pdf</span>}
+                    <span className="proof-badge">{t(workspace.status)}</span>
+                    {workspace.has_pdf && <span className="proof-badge">{t('pdf')}</span>}
                   </div>
                 </div>
                 <div className="account-list-copy">
-                  Updated {new Date(workspace.updated_at).toLocaleString()}
+                  {t('Updated {timestamp}', { timestamp: formatDateTime(workspace.updated_at) })}
                 </div>
               </div>
             ))}

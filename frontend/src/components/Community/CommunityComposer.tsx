@@ -17,6 +17,7 @@ import {
   type IndexedProofSummary,
   type ProjectSummary,
 } from '../../api';
+import { useI18n } from '../../i18n';
 
 interface CommunityComposerProps {
   currentUser: AuthUser | null;
@@ -66,6 +67,7 @@ export function CommunityComposer({
   onCancel,
   onSaved,
 }: CommunityComposerProps) {
+  const { t } = useI18n();
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [contentMarkdown, setContentMarkdown] = useState('');
@@ -145,7 +147,7 @@ export function CommunityComposer({
         setTagsInput(response.tags.join(', '));
       } catch (loadError: any) {
         if (isMounted) {
-          setError(loadError?.response?.data?.detail ?? 'Failed to load the selected post.');
+          setError(loadError?.response?.data?.detail ?? t('Failed to load the selected post.'));
         }
       } finally {
         if (isMounted) {
@@ -259,7 +261,7 @@ export function CommunityComposer({
         : savedPost;
       onSaved(finalPost.id);
     } catch (saveError: any) {
-      setError(saveError?.response?.data?.detail ?? 'Failed to save the community post.');
+      setError(saveError?.response?.data?.detail ?? t('Failed to save the community post.'));
     } finally {
       setIsSavingDraft(false);
       setIsPublishing(false);
@@ -271,14 +273,14 @@ export function CommunityComposer({
       <section className="community-screen">
         <div className="community-shell">
           <div className="glass-panel community-detail-empty">
-            <div className="theorem-empty-state">Sign in to write a community post.</div>
+            <div className="theorem-empty-state">{t('Sign in to write a community post.')}</div>
             <div className="community-detail-actions">
               <button type="button" className="button-secondary" onClick={onCancel}>
                 <ArrowLeft size={16} />
-                Back to Community
+                {t('Back to Community')}
               </button>
               <button type="button" className="button-primary" onClick={onOpenAuth}>
-                Login / Register
+                {t('Login / Register')}
               </button>
             </div>
           </div>
@@ -293,7 +295,7 @@ export function CommunityComposer({
         <div className="community-shell">
           <div className="glass-panel theorem-empty-state">
             <LoaderCircle size={18} className="spin" />
-            Loading composer...
+            {t('Loading composer...')}
           </div>
         </div>
       </section>
@@ -308,10 +310,10 @@ export function CommunityComposer({
             <div className="community-section-header">
               <div className="community-kicker">
                 <Save size={16} />
-                {postId ? 'Edit Community Post' : 'New Community Post'}
+                {postId ? t('Edit Community Post') : t('New Community Post')}
               </div>
               <p className="community-section-copy">
-                Draft in markdown, attach theorem/project context, then publish when ready.
+                {t('Draft in markdown, attach theorem/project context, then publish when ready.')}
               </p>
             </div>
 
@@ -319,28 +321,28 @@ export function CommunityComposer({
 
             <div className="community-composer-form">
               <label>
-                <span className="auth-field-label">Title</span>
+                <span className="auth-field-label">{t('Title')}</span>
                 <input
                   className="input-field"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder="A compactness note on import discipline"
+                  placeholder={t('A compactness note on import discipline')}
                   maxLength={255}
                 />
               </label>
               <label>
-                <span className="auth-field-label">Summary</span>
+                <span className="auth-field-label">{t('Summary')}</span>
                 <textarea
                   className="proof-textarea community-summary-textarea"
                   value={summary}
                   onChange={(event) => setSummary(event.target.value)}
-                  placeholder="A short editorial summary for the archive card."
+                  placeholder={t('A short editorial summary for the archive card.')}
                   maxLength={1200}
                 />
               </label>
               <div className="auth-input-grid">
                 <label>
-                  <span className="auth-field-label">Category</span>
+                  <span className="auth-field-label">{t('Category')}</span>
                   <select
                     className="input-field"
                     value={category}
@@ -348,28 +350,28 @@ export function CommunityComposer({
                   >
                     {COMMUNITY_CATEGORIES.map((item) => (
                       <option key={item.value} value={item.value}>
-                        {item.label}
+                        {t(item.label)}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  <span className="auth-field-label">Tags</span>
+                  <span className="auth-field-label">{t('Tags')}</span>
                   <input
                     className="input-field"
                     value={tagsInput}
                     onChange={(event) => setTagsInput(event.target.value)}
-                    placeholder="compactness, imports, topology"
+                    placeholder={t('compactness, imports, topology')}
                   />
                 </label>
               </div>
               <label>
-                <span className="auth-field-label">Markdown Body</span>
+                <span className="auth-field-label">{t('Markdown Body')}</span>
                 <textarea
                   className="proof-textarea community-markdown-textarea"
                   value={contentMarkdown}
                   onChange={(event) => setContentMarkdown(event.target.value)}
-                  placeholder="# Main idea"
+                  placeholder={t('# Main idea')}
                 />
               </label>
             </div>
@@ -379,10 +381,10 @@ export function CommunityComposer({
                 <div className="community-section-header">
                   <div className="community-kicker">
                     <Link2 size={16} />
-                    Primary Artifact
+                    {t('Primary Artifact')}
                   </div>
                   <p className="community-section-copy">
-                    A single theorem or project that best grounds this post.
+                    {t('A single theorem or project that best grounds this post.')}
                   </p>
                 </div>
                 <label className="community-search-field">
@@ -391,7 +393,7 @@ export function CommunityComposer({
                     className="input-field"
                     value={artifactSearch}
                     onChange={(event) => setArtifactSearch(event.target.value)}
-                    placeholder="Search theorems or projects..."
+                    placeholder={t('Search theorems or projects...')}
                   />
                 </label>
                 {primaryArtifact ? (
@@ -399,7 +401,7 @@ export function CommunityComposer({
                     <div>
                       <strong>{primaryArtifact.title}</strong>
                       <div className="community-card-meta">
-                        {buildArtifactCandidateLabel(primaryArtifact)} · {primaryArtifact.subtitle}
+                        {t(buildArtifactCandidateLabel(primaryArtifact))} · {primaryArtifact.subtitle}
                       </div>
                     </div>
                     <button
@@ -408,14 +410,14 @@ export function CommunityComposer({
                       onClick={() => setPrimaryArtifact(null)}
                     >
                       <X size={14} />
-                      Remove
+                      {t('Remove')}
                     </button>
                   </div>
                 ) : null}
                 {isLoadingArtifacts ? (
                   <div className="theorem-empty-state">
                     <LoaderCircle size={16} className="spin" />
-                    Loading artifacts...
+                    {t('Loading artifacts...')}
                   </div>
                 ) : (
                   <div className="community-artifact-candidate-list">
@@ -433,7 +435,7 @@ export function CommunityComposer({
                       >
                         <strong>{candidate.title}</strong>
                         <span>
-                          {buildArtifactCandidateLabel(candidate)} · {candidate.subtitle}
+                          {t(buildArtifactCandidateLabel(candidate))} · {candidate.subtitle}
                         </span>
                       </button>
                     ))}
@@ -445,10 +447,10 @@ export function CommunityComposer({
                 <div className="community-section-header">
                   <div className="community-kicker">
                     <Link2 size={16} />
-                    Related Artifacts
+                    {t('Related Artifacts')}
                   </div>
                   <p className="community-section-copy">
-                    Additional theorem or project references that support the article.
+                    {t('Additional theorem or project references that support the article.')}
                   </p>
                 </div>
                 <label className="community-search-field">
@@ -457,7 +459,7 @@ export function CommunityComposer({
                     className="input-field"
                     value={relatedSearch}
                     onChange={(event) => setRelatedSearch(event.target.value)}
-                    placeholder="Search supporting artifacts..."
+                    placeholder={t('Search supporting artifacts...')}
                   />
                 </label>
                 {relatedArtifacts.length > 0 ? (
@@ -467,7 +469,7 @@ export function CommunityComposer({
                         <div>
                           <strong>{artifact.title}</strong>
                           <div className="community-card-meta">
-                            {buildArtifactCandidateLabel(artifact)} · {artifact.subtitle}
+                            {t(buildArtifactCandidateLabel(artifact))} · {artifact.subtitle}
                           </div>
                         </div>
                         <button
@@ -480,7 +482,7 @@ export function CommunityComposer({
                           }
                         >
                           <X size={14} />
-                          Remove
+                          {t('Remove')}
                         </button>
                       </div>
                     ))}
@@ -498,7 +500,7 @@ export function CommunityComposer({
                     >
                       <strong>{candidate.title}</strong>
                       <span>
-                        {buildArtifactCandidateLabel(candidate)} · {candidate.subtitle}
+                        {t(buildArtifactCandidateLabel(candidate))} · {candidate.subtitle}
                       </span>
                     </button>
                   ))}
@@ -509,7 +511,7 @@ export function CommunityComposer({
             <div className="community-composer-actions">
               <button type="button" className="button-secondary" onClick={onCancel}>
                 <ArrowLeft size={16} />
-                Back to Community
+                {t('Back to Community')}
               </button>
               <button
                 type="button"
@@ -518,7 +520,7 @@ export function CommunityComposer({
                 disabled={isSavingDraft || isPublishing}
               >
                 {isSavingDraft ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}
-                Save Draft
+                {t('Save Draft')}
               </button>
               <button
                 type="button"
@@ -538,13 +540,13 @@ export function CommunityComposer({
             <div className="community-section-header">
               <div className="community-kicker">
                 <Save size={16} />
-                Live Preview
+                {t('Live Preview')}
               </div>
               <p className="community-section-copy">
                 The preview uses the same markdown renderer as the published post detail page.
               </p>
             </div>
-            <div className="community-preview-title">{title.trim() || 'Untitled community post'}</div>
+            <div className="community-preview-title">{title.trim() || t('Untitled community post')}</div>
             <div className="community-card-tags">
               <span className="proof-badge">
                 {COMMUNITY_CATEGORIES.find((item) => item.value === category)?.label ?? 'Note'}
@@ -558,7 +560,7 @@ export function CommunityComposer({
             {summary.trim() ? <div className="community-article-summary">{summary.trim()}</div> : null}
             <div className="community-markdown-body">
               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {contentMarkdown || '*No markdown body yet.*'}
+                {contentMarkdown || t('*No markdown body yet.*')}
               </ReactMarkdown>
             </div>
           </div>

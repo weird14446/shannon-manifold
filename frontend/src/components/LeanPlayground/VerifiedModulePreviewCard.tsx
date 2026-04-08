@@ -1,6 +1,7 @@
 import { FileCode2, FileText, LoaderCircle, X } from 'lucide-react';
 
 import { getTheoremPdfUrl, type IndexedProofDetail } from '../../api';
+import { useI18n } from '../../i18n';
 import { LeanCodeHighlighter } from '../TheoremList/LeanCodeHighlighter';
 
 interface VerifiedModulePreviewCardProps {
@@ -20,11 +21,12 @@ export function VerifiedModulePreviewCard({
   onClose,
   onRemix,
 }: VerifiedModulePreviewCardProps) {
+  const { t, formatDateTime } = useI18n();
   if (!detail && !error && !isLoading) {
     return null;
   }
 
-  const updatedAtLabel = detail ? new Date(detail.updated_at).toLocaleString() : '';
+  const updatedAtLabel = detail ? formatDateTime(detail.updated_at) : '';
   const pdfPreviewUrl = detail?.has_pdf ? getTheoremPdfUrl(detail.id) : null;
 
   return (
@@ -37,16 +39,16 @@ export function VerifiedModulePreviewCard({
           <div className="playground-module-preview-heading">
             <div className="verified-code-kicker">
               <FileCode2 size={16} />
-              Verified Module
+              {t('Verified Module')}
             </div>
-            <h3>{detail?.title ?? modulePath ?? 'Verified module'}</h3>
-            <p>{detail?.path ?? detail?.module_name ?? modulePath ?? 'Project module'}</p>
+            <h3>{detail?.title ?? modulePath ?? t('Verified module')}</h3>
+            <p>{detail?.path ?? detail?.module_name ?? modulePath ?? t('Project module')}</p>
           </div>
           <button
             type="button"
             className="playground-module-preview-close"
             onClick={onClose}
-            aria-label="Close module preview"
+            aria-label={t('Close module preview')}
           >
             <X size={18} />
           </button>
@@ -55,7 +57,7 @@ export function VerifiedModulePreviewCard({
         {isLoading ? (
           <div className="theorem-empty-state">
             <LoaderCircle size={18} className="spin" />
-            Loading verified module...
+            {t('Loading verified module...')}
           </div>
         ) : error ? (
           <div className="theorem-empty-state">{error}</div>
@@ -63,9 +65,9 @@ export function VerifiedModulePreviewCard({
           <>
             <div className="playground-module-preview-meta">
               <span className="proof-badge">{detail.proof_language}</span>
-              <span className="proof-badge">{detail.is_verified ? 'verified' : 'draft'}</span>
+              <span className="proof-badge">{detail.is_verified ? t('verified') : t('draft')}</span>
               {detail.project_title && <span className="proof-badge">{detail.project_title}</span>}
-              {detail.has_pdf && <span className="proof-badge">pdf</span>}
+              {detail.has_pdf && <span className="proof-badge">{t('pdf')}</span>}
               <span className="proof-badge">{updatedAtLabel}</span>
             </div>
 
@@ -78,7 +80,7 @@ export function VerifiedModulePreviewCard({
                   rel="noreferrer"
                 >
                   <FileText size={16} />
-                  Open PDF
+                  {t('Open PDF')}
                 </a>
               </div>
             )}
@@ -89,10 +91,10 @@ export function VerifiedModulePreviewCard({
 
             <div className="playground-module-preview-footer">
               <button type="button" className="button-secondary" onClick={onRemix}>
-                Remix this module
+                {t('Remix this module')}
               </button>
               <button type="button" className="button-primary" onClick={onClose}>
-                Return to Playground
+                {t('Return to Playground')}
               </button>
             </div>
           </>
