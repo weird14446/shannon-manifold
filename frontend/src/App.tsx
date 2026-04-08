@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Bot, LogOut, Microscope, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import './index.css';
 
@@ -27,21 +27,6 @@ import { useI18n } from './i18n';
 type AppView = 'dashboard' | 'community' | 'projects' | 'playground' | 'code' | 'admin' | 'my';
 const CHAT_POPOVER_MIN_WIDTH = 360;
 const CHAT_POPOVER_MIN_HEIGHT = 420;
-const CHAT_POPOVER_DEFAULT_WIDTH = 420;
-const CHAT_POPOVER_DEFAULT_HEIGHT = 620;
-const CHAT_DOCK_MIN_WIDTH = 360;
-const CHAT_DOCK_DEFAULT_WIDTH = 420;
-const CHAT_DOCK_MAX_WIDTH = 560;
-const CHAT_DOCK_MAX_VIEWPORT_RATIO = 0.42;
-const CHAT_LAYOUT_BREAKPOINT = 1100;
-const CHAT_LAYOUT_BUFFER = 72;
-const CHAT_LAYOUT_MODE_STORAGE_KEY = 'shannon-manifold-chat-layout-mode';
-const CHAT_DOCK_SIDE_STORAGE_KEY = 'shannon-manifold-chat-dock-side';
-const CHAT_DOCK_WIDTH_STORAGE_KEY = 'shannon-manifold-chat-dock-width';
-const CHAT_POPOVER_SIZE_STORAGE_KEY = 'shannon-manifold-chat-popover-size';
-
-type ChatLayoutMode = 'floating' | 'docked';
-type ChatDockSide = 'left' | 'right';
 
 interface ChatPopoverSize {
   width: number;
@@ -183,102 +168,6 @@ const encodeLeanShareCode = (code: string) => {
   return window.btoa(binary);
 };
 
-const getInitialChatLayoutMode = (): ChatLayoutMode => {
-  if (typeof window === 'undefined') {
-    return 'floating';
-  }
-
-  const stored = window.localStorage.getItem(CHAT_LAYOUT_MODE_STORAGE_KEY);
-  return stored === 'docked' ? 'docked' : 'floating';
-};
-
-const getInitialChatDockSide = (): ChatDockSide => {
-  if (typeof window === 'undefined') {
-    return 'right';
-  }
-
-  const stored = window.localStorage.getItem(CHAT_DOCK_SIDE_STORAGE_KEY);
-  return stored === 'left' ? 'left' : 'right';
-};
-
-const clampChatDockWidth = (width: number, viewportWidth: number) => {
-  const maxWidth = Math.max(
-    CHAT_DOCK_MIN_WIDTH,
-    Math.min(CHAT_DOCK_MAX_WIDTH, Math.floor(viewportWidth * CHAT_DOCK_MAX_VIEWPORT_RATIO)),
-  );
-  return Math.min(maxWidth, Math.max(CHAT_DOCK_MIN_WIDTH, width));
-};
-
-const getInitialChatDockWidth = () => {
-  if (typeof window === 'undefined') {
-    return CHAT_DOCK_DEFAULT_WIDTH;
-  }
-
-  const parsed = Number(window.localStorage.getItem(CHAT_DOCK_WIDTH_STORAGE_KEY));
-  if (!Number.isFinite(parsed)) {
-    return CHAT_DOCK_DEFAULT_WIDTH;
-  }
-  return clampChatDockWidth(parsed, window.innerWidth);
-};
-
-const clampChatPopoverSize = (size: ChatPopoverSize) => {
-  if (typeof window === 'undefined') {
-    return size;
-  }
-
-  const maxWidth = Math.max(CHAT_POPOVER_MIN_WIDTH, window.innerWidth - 32);
-  const maxHeight = Math.max(CHAT_POPOVER_MIN_HEIGHT, window.innerHeight - 128);
-  return {
-    width: Math.min(maxWidth, Math.max(CHAT_POPOVER_MIN_WIDTH, size.width)),
-    height: Math.min(maxHeight, Math.max(CHAT_POPOVER_MIN_HEIGHT, size.height)),
-  };
-};
-
-const getInitialChatPopoverSize = (): ChatPopoverSize | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const stored = window.localStorage.getItem(CHAT_POPOVER_SIZE_STORAGE_KEY);
-  if (!stored) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(stored) as Partial<ChatPopoverSize>;
-    if (!Number.isFinite(parsed.width) || !Number.isFinite(parsed.height)) {
-      return null;
-    }
-    return clampChatPopoverSize({
-      width: parsed.width as number,
-      height: parsed.height as number,
-    });
-  } catch (_error) {
-    return null;
-  }
-};
-
-const getViewMinimumPrimaryWidth = (view: AppView) => {
-  switch (view) {
-    case 'playground':
-      return 1100;
-    case 'code':
-      return 1080;
-    case 'dashboard':
-      return 980;
-    case 'community':
-      return 1020;
-    case 'projects':
-      return 940;
-    case 'admin':
-      return 1040;
-    case 'my':
-      return 980;
-    default:
-      return 960;
-  }
-};
-
 function App() {
   const { language, setLanguage, t } = useI18n();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -309,28 +198,13 @@ function App() {
     null,
   );
   const [playgroundChatAttachment, setPlaygroundChatAttachment] = useState<File | null>(null);
-  const [chatLayoutMode, setChatLayoutMode] = useState<ChatLayoutMode>(() =>
-    getInitialChatLayoutMode(),
-  );
-  const [chatDockSide, setChatDockSide] = useState<ChatDockSide>(() => getInitialChatDockSide());
-  const [chatDockWidth, setChatDockWidth] = useState(() => getInitialChatDockWidth());
-  const [chatPopoverSize, setChatPopoverSize] = useState<ChatPopoverSize | null>(() =>
-    getInitialChatPopoverSize(),
-  );
-  const [viewportWidth, setViewportWidth] = useState(() =>
-    typeof window === 'undefined' ? 1440 : window.innerWidth,
-  );
+  const [chatPopoverSize, setChatPopoverSize] = useState<ChatPopoverSize | null>(null);
   const chatPopoverRef = useRef<HTMLDivElement>(null);
   const chatResizeStateRef = useRef<{
     startX: number;
     startY: number;
     startWidth: number;
     startHeight: number;
-  } | null>(null);
-  const chatDockResizeStateRef = useRef<{
-    startX: number;
-    startWidth: number;
-    dockSide: ChatDockSide;
   } | null>(null);
 
   const LazyLeanPlayground = useMemo(
@@ -459,89 +333,6 @@ function App() {
 
     window.history.replaceState({}, '', url);
   }, [communityRoute, currentView, playgroundSeed, selectedDocumentId]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const handleResize = () => {
-      setViewportWidth(window.innerWidth);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CHAT_LAYOUT_MODE_STORAGE_KEY, chatLayoutMode);
-  }, [chatLayoutMode]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CHAT_DOCK_SIDE_STORAGE_KEY, chatDockSide);
-  }, [chatDockSide]);
-
-  useEffect(() => {
-    const nextWidth = clampChatDockWidth(chatDockWidth, viewportWidth);
-    if (nextWidth !== chatDockWidth) {
-      setChatDockWidth(nextWidth);
-      return;
-    }
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CHAT_DOCK_WIDTH_STORAGE_KEY, String(nextWidth));
-  }, [chatDockWidth, viewportWidth]);
-
-  useEffect(() => {
-    if (!chatPopoverSize) {
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem(CHAT_POPOVER_SIZE_STORAGE_KEY);
-      }
-      return;
-    }
-
-    const nextSize = clampChatPopoverSize(chatPopoverSize);
-    if (
-      nextSize.width !== chatPopoverSize.width ||
-      nextSize.height !== chatPopoverSize.height
-    ) {
-      setChatPopoverSize(nextSize);
-      return;
-    }
-
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(CHAT_POPOVER_SIZE_STORAGE_KEY, JSON.stringify(nextSize));
-  }, [chatPopoverSize]);
-
-  const effectiveChatDockWidth = useMemo(
-    () => clampChatDockWidth(chatDockWidth, viewportWidth),
-    [chatDockWidth, viewportWidth],
-  );
-
-  const isChatForcedFloating =
-    chatLayoutMode === 'docked' &&
-    (viewportWidth <= CHAT_LAYOUT_BREAKPOINT ||
-      viewportWidth <
-        getViewMinimumPrimaryWidth(currentView) + effectiveChatDockWidth + CHAT_LAYOUT_BUFFER);
-
-  const isChatDockActive = chatLayoutMode === 'docked' && !isChatForcedFloating;
-  const isChatFloatingActive = !isChatDockActive;
 
   const handleAuthenticated = (payload: AuthResponse) => {
     setAuthToken(payload.access_token);
@@ -704,15 +495,7 @@ function App() {
     });
   };
 
-  const handleChatLayoutModeChange = (nextMode: ChatLayoutMode, nextSide?: ChatDockSide) => {
-    setChatLayoutMode(nextMode);
-    if (nextSide) {
-      setChatDockSide(nextSide);
-    }
-    setIsChatOpen(true);
-  };
-
-  const handleChatPopoverResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleChatResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
     const popover = chatPopoverRef.current;
     if (!popover) {
       return;
@@ -759,44 +542,6 @@ function App() {
     window.addEventListener('pointerup', handlePointerUp);
   };
 
-  const handleChatDockResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
-    const panel = chatPopoverRef.current;
-    if (!panel) {
-      return;
-    }
-
-    const rect = panel.getBoundingClientRect();
-    chatDockResizeStateRef.current = {
-      startX: event.clientX,
-      startWidth: rect.width,
-      dockSide: chatDockSide,
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      const state = chatDockResizeStateRef.current;
-      if (!state) {
-        return;
-      }
-
-      const deltaX = moveEvent.clientX - state.startX;
-      const nextWidth =
-        state.dockSide === 'right'
-          ? state.startWidth - deltaX
-          : state.startWidth + deltaX;
-
-      setChatDockWidth(clampChatDockWidth(nextWidth, window.innerWidth));
-    };
-
-    const handlePointerUp = () => {
-      chatDockResizeStateRef.current = null;
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-  };
-
   const renderPlaygroundFallback = (errorMessage?: string | null) => (
     <div className="screen-fallback-card glass-panel">
       <div className="screen-fallback-title">{t('Lean Playground is unavailable.')}</div>
@@ -816,33 +561,6 @@ function App() {
       </div>
     </div>
   );
-
-  const chatPanelClassName = [
-    'chat-panel-shell',
-    'glass-panel',
-    isChatOpen ? 'is-open' : '',
-    isChatDockActive ? 'is-docked' : 'is-floating',
-    chatDockSide === 'left' ? 'is-dock-left' : 'is-dock-right',
-    isChatForcedFloating ? 'is-forced-floating' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  const chatPanelStyle = isChatDockActive
-    ? ({
-        '--chat-dock-width': `${effectiveChatDockWidth}px`,
-      } as CSSProperties)
-    : ({
-        '--chat-floating-width': `${chatPopoverSize?.width ?? CHAT_POPOVER_DEFAULT_WIDTH}px`,
-        '--chat-floating-height': `${chatPopoverSize?.height ?? CHAT_POPOVER_DEFAULT_HEIGHT}px`,
-      } as CSSProperties);
-
-  const chatLauncherStyle =
-    isChatOpen && isChatDockActive && chatDockSide === 'right'
-      ? ({
-          right: `${effectiveChatDockWidth + 32}px`,
-        } as CSSProperties)
-      : undefined;
 
   return (
     <div className="layout">
@@ -946,302 +664,264 @@ function App() {
         </div>
       </header>
 
-      <main
-        className={`main-content ${isChatDockActive && isChatOpen ? 'has-chat-dock' : ''} ${
-          isChatDockActive && isChatOpen && chatDockSide === 'left' ? 'is-chat-dock-left' : ''
-        } ${isChatDockActive && isChatOpen && chatDockSide === 'right' ? 'is-chat-dock-right' : ''}`}
-        style={{ height: 'calc(100vh - 72px)' }}
-      >
-        <div className="app-primary-pane">
-          {currentView === 'dashboard' ? (
-            <section className="dashboard-screen">
-              <div className="glass-panel dashboard-filter-bar">
-                <div className="dashboard-filter-copy">
-                  <div className="dashboard-filter-title">{t('Unified Project Filter')}</div>
-                  <div className="dashboard-filter-subtitle">
-                    {t(
-                      'The selected project scope applies to both Verified Database and Lean Import Manifold.',
-                    )}
-                  </div>
+      <main className="main-content" style={{ height: 'calc(100vh - 72px)' }}>
+        {currentView === 'dashboard' ? (
+          <section className="dashboard-screen">
+            <div className="glass-panel dashboard-filter-bar">
+              <div className="dashboard-filter-copy">
+                <div className="dashboard-filter-title">{t('Unified Project Filter')}</div>
+                <div className="dashboard-filter-subtitle">
+                  {t(
+                    'The selected project scope applies to both Verified Database and Lean Import Manifold.',
+                  )}
                 </div>
-                <label className="dashboard-filter-control">
-                  <span>{t('Project Scope')}</span>
-                  <select
-                    className="input-field dashboard-filter-select"
-                    value={dashboardProjectFilter}
-                    onChange={(event) => setDashboardProjectFilter(event.target.value)}
-                  >
-                    <option value="all">{t('All Projects')}</option>
-                    <option value="shared">{t('Shared / No Project')}</option>
-                    {dashboardProjectOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
+              <label className="dashboard-filter-control">
+                <span>{t('Project Scope')}</span>
+                <select
+                  className="input-field dashboard-filter-select"
+                  value={dashboardProjectFilter}
+                  onChange={(event) => setDashboardProjectFilter(event.target.value)}
+                >
+                  <option value="all">{t('All Projects')}</option>
+                  <option value="shared">{t('Shared / No Project')}</option>
+                  {dashboardProjectOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-              <section className="dashboard-columns">
-                <aside className="glass-panel dashboard-database-panel">
-                  <TheoremExplorer
-                    currentUser={currentUser}
-                    onOpenProof={openVerifiedCode}
-                    projectFilter={dashboardProjectFilter}
-                    onProjectFilterChange={setDashboardProjectFilter}
-                    onProjectOptionsChange={setTheoremProjectOptions}
-                    hideProjectFilter
-                  />
-                </aside>
+            <section className="dashboard-columns">
+              <aside className="glass-panel dashboard-database-panel">
+                <TheoremExplorer
+                  currentUser={currentUser}
+                  onOpenProof={openVerifiedCode}
+                  projectFilter={dashboardProjectFilter}
+                  onProjectFilterChange={setDashboardProjectFilter}
+                  onProjectOptionsChange={setTheoremProjectOptions}
+                  hideProjectFilter
+                />
+              </aside>
 
-                <section className="dashboard-main-panel">
+              <section className="dashboard-main-panel">
+                <div
+                  className="glass-panel"
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
                   <div
-                    className="glass-panel"
                     style={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      position: 'relative',
-                      overflow: 'hidden',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      zIndex: 10,
+                      padding: '20px',
+                      pointerEvents: 'none',
                     }}
                   >
                     <div
                       style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        zIndex: 10,
-                        padding: '20px',
-                        pointerEvents: 'none',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        width: '100%',
                       }}
                     >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'space-between',
-                          gap: '16px',
-                          width: '100%',
-                        }}
-                      >
-                        <div>
-                          <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                            {t('Lean Import Manifold')}
-                          </h2>
-                          <p
-                            style={{
-                              color: 'rgba(255,255,255,0.7)',
-                              fontSize: '0.9rem',
-                              marginTop: '4px',
-                              textShadow: '0 1px 2px rgba(0,0,0,0.5)',
-                            }}
-                          >
-                            {t(
-                              'Visualized import relationships across verified user-uploaded Lean modules. Refresh when you want a new snapshot.',
-                            )}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          style={{ pointerEvents: 'auto' }}
-                          onClick={() => setGraphRefreshKey((current) => current + 1)}
+                      <div>
+                        <h2 style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+                          {t('Lean Import Manifold')}
+                        </h2>
+                        <p
+                          style={{
+                            color: 'rgba(255,255,255,0.7)',
+                            fontSize: '0.9rem',
+                            marginTop: '4px',
+                            textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                          }}
                         >
-                          <RefreshCw size={16} />
-                          {t('Refresh')}
-                        </button>
+                          {t(
+                            'Visualized import relationships across verified user-uploaded Lean modules. Refresh when you want a new snapshot.',
+                          )}
+                        </p>
                       </div>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        style={{ pointerEvents: 'auto' }}
+                        onClick={() => setGraphRefreshKey((current) => current + 1)}
+                      >
+                        <RefreshCw size={16} />
+                        {t('Refresh')}
+                      </button>
                     </div>
-                    <AgentGraph
-                      refreshKey={graphRefreshKey}
-                      onOpenProof={openVerifiedCode}
-                      projectFilter={dashboardProjectFilter}
-                      onProjectFilterChange={setDashboardProjectFilter}
-                      onProjectOptionsChange={setGraphProjectOptions}
-                      hideProjectFilter
-                    />
                   </div>
-                </section>
-              </section>
-            </section>
-          ) : currentView === 'community' ? (
-            communityRoute.mode === 'compose' ? (
-              <CommunityComposer
-                currentUser={currentUser}
-                onOpenAuth={() => setIsAuthOpen(true)}
-                postId={communityRoute.postId}
-                onCancel={openCommunityHome}
-                onSaved={openCommunityPost}
-              />
-            ) : communityRoute.mode === 'detail' && communityRoute.postId ? (
-              <CommunityPostDetail
-                postId={communityRoute.postId}
-                currentUser={currentUser}
-                onOpenAuth={() => setIsAuthOpen(true)}
-                onBack={openCommunityHome}
-                onOpenProof={openVerifiedCode}
-                onOpenProject={openProjectDetail}
-                onEditPost={openCommunityComposer}
-                onDeleted={openCommunityHome}
-              />
-            ) : (
-              <CommunityHome
-                currentUser={currentUser}
-                onOpenAuth={() => setIsAuthOpen(true)}
-                onOpenPost={openCommunityPost}
-                onCompose={() => {
-                  if (!currentUser) {
-                    setIsAuthOpen(true);
-                    return;
-                  }
-                  openCommunityComposer();
-                }}
-              />
-            )
-          ) : currentView === 'projects' ? (
-            <ProjectPanel
-              variant="page"
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-              initialSelectedProjectKey={projectPanelSelectedKey}
-            />
-          ) : currentView === 'my' ? (
-            <MyPage
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-              onOpenProof={openVerifiedCode}
-              onOpenProject={openProjectDetail}
-              onUserUpdated={handleUserUpdated}
-            />
-          ) : currentView === 'admin' ? (
-            <AdminPage
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-              onUserUpdated={handleUserUpdated}
-            />
-          ) : currentView === 'code' ? (
-            selectedDocumentId ? (
-              <VerifiedCodeViewer
-                currentUser={currentUser}
-                documentId={selectedDocumentId}
-                onBack={() => setCurrentView(codeBackView)}
-                onOpenAuth={() => setIsAuthOpen(true)}
-                onOpenPlayground={openLeanPlayground}
-              />
-            ) : (
-              <section className="verified-code-screen glass-panel">
-                <div className="theorem-empty-state">
-                  {t('Select a verified code entry from the dashboard.')}
+                  <AgentGraph
+                    refreshKey={graphRefreshKey}
+                    onOpenProof={openVerifiedCode}
+                    projectFilter={dashboardProjectFilter}
+                    onProjectFilterChange={setDashboardProjectFilter}
+                    onProjectOptionsChange={setGraphProjectOptions}
+                    hideProjectFilter
+                  />
                 </div>
               </section>
-            )
-          ) : (
-            <section className="playground-screen">
-              <RecoverableErrorBoundary
-                fallback={renderPlaygroundFallback}
-                resetKey={`playground-${playgroundLoaderVersion}-${playgroundSeed?.revision ?? 0}`}
-              >
-                <Suspense fallback={renderPlaygroundFallback()}>
-                  <LazyLeanPlayground
-                    seed={playgroundSeed}
-                    currentUser={currentUser}
-                    onOpenAuth={() => setIsAuthOpen(true)}
-                    onLogout={handleLogout}
-                    onSessionMetadataChange={setPlaygroundSessionMetadata}
-                    onDocumentChange={setPlaygroundChatContext}
-                    onAttachmentChange={setPlaygroundChatAttachment}
-                  />
-                </Suspense>
-              </RecoverableErrorBoundary>
             </section>
-          )}
-        </div>
-
-        <div ref={chatPopoverRef} className={chatPanelClassName} style={chatPanelStyle}>
-          {isChatFloatingActive ? (
-            <div
-              className="chat-panel-resize-handle is-floating"
-              onPointerDown={handleChatPopoverResizeStart}
-              aria-hidden="true"
-            />
-          ) : (
-            <div
-              className={`chat-panel-resize-handle is-docked ${chatDockSide === 'left' ? 'is-right-edge' : 'is-left-edge'}`}
-              onPointerDown={handleChatDockResizeStart}
-              aria-hidden="true"
-            />
-          )}
-          <div className="chat-panel-header">
-            <div className="chat-panel-title-block">
-              <div className="chat-panel-title-row">
-                <div className="chat-panel-title">{t('Theorem Oracle')}</div>
-                <span className="chat-panel-mode-badge">
-                  {t(isChatFloatingActive ? 'Floating' : 'Docked')}
-                </span>
-              </div>
-              <div className="chat-panel-subtitle">
-                {currentUser
-                  ? t('Signed in as {name}', { name: currentUser.full_name })
-                  : t('Sign in to ask questions about Lean4, Rocq, and proofs.')}
-              </div>
-            </div>
-            <div className="chat-panel-header-actions">
-              <div className="chat-layout-toggle" role="group" aria-label={t('Theorem Oracle')}>
-                <button
-                  type="button"
-                  className={`chat-layout-toggle-button ${chatLayoutMode === 'floating' ? 'is-active' : ''}`}
-                  onClick={() => handleChatLayoutModeChange('floating')}
-                  aria-label={t('Switch to floating chat')}
-                >
-                  {t('Floating')}
-                </button>
-                <button
-                  type="button"
-                  className={`chat-layout-toggle-button ${chatLayoutMode === 'docked' && chatDockSide === 'left' ? 'is-active' : ''}`}
-                  onClick={() => handleChatLayoutModeChange('docked', 'left')}
-                  aria-label={t('Dock left')}
-                >
-                  {t('Dock left')}
-                </button>
-                <button
-                  type="button"
-                  className={`chat-layout-toggle-button ${chatLayoutMode === 'docked' && chatDockSide === 'right' ? 'is-active' : ''}`}
-                  onClick={() => handleChatLayoutModeChange('docked', 'right')}
-                  aria-label={t('Dock right')}
-                >
-                  {t('Dock right')}
-                </button>
-              </div>
-              <button
-                type="button"
-                className="chat-panel-close"
-                onClick={() => setIsChatOpen(false)}
-                aria-label={t('Close chatbot')}
-              >
-                <X size={18} />
-              </button>
-            </div>
-          </div>
-          <div className="chat-panel-body">
-            <Chatbot
+          </section>
+        ) : currentView === 'community' ? (
+          communityRoute.mode === 'compose' ? (
+            <CommunityComposer
               currentUser={currentUser}
               onOpenAuth={() => setIsAuthOpen(true)}
-              onLogout={handleLogout}
-              codeContext={currentView === 'playground' ? playgroundChatContext : null}
-              defaultAttachmentFile={
-                currentView === 'playground' ? playgroundChatAttachment : null
-              }
-              onApplySuggestedCode={handleApplyChatSuggestedCode}
+              postId={communityRoute.postId}
+              onCancel={openCommunityHome}
+              onSaved={openCommunityPost}
             />
-          </div>
-        </div>
+          ) : communityRoute.mode === 'detail' && communityRoute.postId ? (
+            <CommunityPostDetail
+              postId={communityRoute.postId}
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onBack={openCommunityHome}
+              onOpenProof={openVerifiedCode}
+              onOpenProject={openProjectDetail}
+              onEditPost={openCommunityComposer}
+              onDeleted={openCommunityHome}
+            />
+          ) : (
+            <CommunityHome
+              currentUser={currentUser}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onOpenPost={openCommunityPost}
+              onCompose={() => {
+                if (!currentUser) {
+                  setIsAuthOpen(true);
+                  return;
+                }
+                openCommunityComposer();
+              }}
+            />
+          )
+        ) : currentView === 'projects' ? (
+          <ProjectPanel
+            variant="page"
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            initialSelectedProjectKey={projectPanelSelectedKey}
+          />
+        ) : currentView === 'my' ? (
+          <MyPage
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onOpenProof={openVerifiedCode}
+            onOpenProject={openProjectDetail}
+            onUserUpdated={handleUserUpdated}
+          />
+        ) : currentView === 'admin' ? (
+          <AdminPage
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onUserUpdated={handleUserUpdated}
+          />
+        ) : currentView === 'code' ? (
+          selectedDocumentId ? (
+            <VerifiedCodeViewer
+              currentUser={currentUser}
+              documentId={selectedDocumentId}
+              onBack={() => setCurrentView(codeBackView)}
+              onOpenAuth={() => setIsAuthOpen(true)}
+              onOpenPlayground={openLeanPlayground}
+            />
+          ) : (
+            <section className="verified-code-screen glass-panel">
+              <div className="theorem-empty-state">
+                {t('Select a verified code entry from the dashboard.')}
+              </div>
+            </section>
+          )
+        ) : (
+          <section className="playground-screen">
+            <RecoverableErrorBoundary
+              fallback={renderPlaygroundFallback}
+              resetKey={`playground-${playgroundLoaderVersion}-${playgroundSeed?.revision ?? 0}`}
+            >
+              <Suspense fallback={renderPlaygroundFallback()}>
+                <LazyLeanPlayground
+                  seed={playgroundSeed}
+                  currentUser={currentUser}
+                  onOpenAuth={() => setIsAuthOpen(true)}
+                  onLogout={handleLogout}
+                  onSessionMetadataChange={setPlaygroundSessionMetadata}
+                  onDocumentChange={setPlaygroundChatContext}
+                  onAttachmentChange={setPlaygroundChatAttachment}
+                />
+              </Suspense>
+            </RecoverableErrorBoundary>
+          </section>
+        )}
       </main>
+
+      <div
+        ref={chatPopoverRef}
+        className={`chat-popover glass-panel ${isChatOpen ? 'is-open' : ''}`}
+        style={
+          chatPopoverSize
+            ? {
+                width: `${chatPopoverSize.width}px`,
+                height: `${chatPopoverSize.height}px`,
+              }
+            : undefined
+        }
+      >
+        <div
+          className="chat-popover-resize-handle"
+          onPointerDown={handleChatResizeStart}
+          aria-hidden="true"
+        />
+        <div className="chat-popover-header">
+          <div>
+            <div className="chat-popover-title">{t('Theorem Oracle')}</div>
+            <div className="chat-popover-subtitle">
+              {currentUser
+                ? t('Signed in as {name}', { name: currentUser.full_name })
+                : t('Sign in to ask questions about Lean4, Rocq, and proofs.')}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="chat-popover-close"
+            onClick={() => setIsChatOpen(false)}
+            aria-label={t('Close chatbot')}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="chat-popover-body">
+          <Chatbot
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onLogout={handleLogout}
+            codeContext={currentView === 'playground' ? playgroundChatContext : null}
+            defaultAttachmentFile={
+              currentView === 'playground' ? playgroundChatAttachment : null
+            }
+            onApplySuggestedCode={handleApplyChatSuggestedCode}
+          />
+        </div>
+      </div>
 
       <button
         type="button"
         className={`chat-launcher ${isChatOpen ? 'is-open' : ''}`}
         onClick={() => setIsChatOpen((current) => !current)}
-        style={chatLauncherStyle}
         aria-label={isChatOpen ? t('Close chatbot') : t('Open chatbot')}
       >
         {isChatOpen ? <X size={22} /> : <Bot size={22} />}
